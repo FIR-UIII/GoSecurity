@@ -23,7 +23,7 @@ const (
 
 type HelloRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -58,9 +58,9 @@ func (*HelloRequest) Descriptor() ([]byte, []int) {
 	return file_proto_helloworld_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *HelloRequest) GetName() string {
+func (x *HelloRequest) GetId() string {
 	if x != nil {
-		return x.Name
+		return x.Id
 	}
 	return ""
 }
@@ -113,15 +113,14 @@ var File_proto_helloworld_proto protoreflect.FileDescriptor
 
 const file_proto_helloworld_proto_rawDesc = "" +
 	"\n" +
-	"\x16proto/helloworld.proto\x12\n" +
-	"helloworld\"\"\n" +
-	"\fHelloRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"&\n" +
+	"\x16proto/helloworld.proto\x12\btutorial\"\x1e\n" +
+	"\fHelloRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"&\n" +
 	"\n" +
 	"HelloReply\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage2I\n" +
-	"\aGreeter\x12>\n" +
-	"\bSayHello\x12\x18.helloworld.HelloRequest\x1a\x16.helloworld.HelloReply\"\x00B\x14Z\x12grpc-example/protob\x06proto3"
+	"\amessage\x18\x01 \x01(\tR\amessage2C\n" +
+	"\aGreeter\x128\n" +
+	"\bSayHello\x12\x16.tutorial.HelloRequest\x1a\x14.tutorial.HelloReplyB\x15Z\x13grpc-practice/protob\x06proto3"
 
 var (
 	file_proto_helloworld_proto_rawDescOnce sync.Once
@@ -137,12 +136,12 @@ func file_proto_helloworld_proto_rawDescGZIP() []byte {
 
 var file_proto_helloworld_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_proto_helloworld_proto_goTypes = []any{
-	(*HelloRequest)(nil), // 0: helloworld.HelloRequest
-	(*HelloReply)(nil),   // 1: helloworld.HelloReply
+	(*HelloRequest)(nil), // 0: tutorial.HelloRequest
+	(*HelloReply)(nil),   // 1: tutorial.HelloReply
 }
 var file_proto_helloworld_proto_depIdxs = []int32{
-	0, // 0: helloworld.Greeter.SayHello:input_type -> helloworld.HelloRequest
-	1, // 1: helloworld.Greeter.SayHello:output_type -> helloworld.HelloReply
+	0, // 0: tutorial.Greeter.SayHello:input_type -> tutorial.HelloRequest
+	1, // 1: tutorial.Greeter.SayHello:output_type -> tutorial.HelloReply
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
