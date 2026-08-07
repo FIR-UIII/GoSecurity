@@ -46,8 +46,59 @@ Value (от 0 до 253 байт): Полезная нагрузка указан
     | <----- 5. Accounting-Response ------------ |
 ```
 
+### RFC 3579 EAP authentification
+RFC 3579 принес возможность встраивать в протокол RADIUS протокол аутентификации EAP (EAP внутри RADIUS EAP-Message)
+```
+Supplicant            Клиент (NAS)                    RADIUS Сервер
+(EAP Peer)
+    |                      |                               |
+    |---- EAPOL-Start ---->|                               |
+    |                      |                               |
+    |<-- EAP-Request/ID ---|                               |
+    |                      |                               |
+    |-- EAP-Response/ID -->|                               |
+    |                      |                               |
+    |==== Access-Request (ID:42 + EAP-Response/ID) =======>|
+    |                      |                               |
+    |<=== Access-Challenge (EAP-Request/MD5 Challenge) ====|
+    |                      |                               |
+    |<-- EAP-Request/MD5 --|                               |
+    |                      |                               |
+    |-- EAP-Response/MD5 ->|                               |
+    |                      |                               |
+    |==== Access-Request (ID:43 + EAP-Response/MD5) ======>|
+    |                      |                               |
+    |<==== Access-Accept (EAP Success) ====================|
+    |                      |                               |
+    |<------ EAP Success --|                               |
+    |                      |                               |
+    |===== Сессия открыта =================================|
+    |                      |                               |
+    |==== Accounting-Start ===============================>|
+    |<=== Accounting-Response =============================|
+    |                      |                               |
+    |==== Accounting-Stop ================================>|
+    |<=== Accounting-Response =============================|
+```
+
+| EAP Type	|Type ID|How auth works |	Notes |
+| --------- | ------|---------------|--------|
+|EAP-MD5	|4	    | MD5(ID ‖ pwd ‖ challenge)	| Easiest no PKI needed |
+|EAP-OTP	|5	    | Server sends a text prompt, client sends one-time password |	Trivial to add — same 2-round flow |
+|EAP-GTC	|6	    | Generic token card; server sends challenge string, client sends token value |	Cisco proprietary but trivial to parse |
+|EAP-TLS	|13 	|Mutual certificate auth inside TLS handshake | Multi-fragment; needs crypto/tls + PKI |
+|EAP-TTLS	|21	    |TLS tunnel, then inner auth (PAP/CHAP/EAP-MD5 inside) |	Common in enterprise Wi-Fi |
+|EAP-PEAP	|25	    |TLS tunnel, then inner EAP-MSCHAPv2 |	Most common in Windows environments |
+|EAP-MSCHAPv2|26	|MS-CHAPv2 challenge-response (NT hash based) |	Needs rfc2759 — already in layeh |
+|EAP-PWD	|52	    |Dragonfly/SPEKE PAKE — no certificates needed |	Resistant to offline dictionary attacks |
+
+
 Что дальше
 > Динамическая авторизация — CoA и Disconnect (RFC 3576 / RFC 5176). Суть: Раньше RADIUS-сервер был пассивным: он только отвечал на запросы NAS. RFC ввел CoA (Change of Authorization) и Disconnect Messages. Теперь RADIUS-сервер сам может отправить на NAS пакет: "Сбрось этого пользователя прямо сейчас" (Disconnect-Request) или "Поменяй ему VLAN/скорость на лету" (CoA-Request)
-> Переход на EAP и защита от подделки (RFC 3579). Суть: Отказ от передачи открытых/маскированных MD5 паролей в пользу EAP (Extensible Authentication Protocol).
+> Переход на EAP и защита от подделки (RFC 3579). Суть: Отказ от передачи открытых/маскированных MD5 паролей в пользу EAP (Extensible Authentication Protocol)
 > RadSec: RADIUS over TLS / DTLS (RFC 6614). Суть: Завернуть весь RADIUS-трафик в безопасный туннель (TLS по TCP или DTLS по UDP).
 > Diameter: Наследник нового поколения (RFC 3588 / RFC 6733). Суть: Полный отказ от RADIUS в пользу переработанного с нуля протокола (Diameter = «в два раза больше, чем Radius»).
+
+
+# Источники
+https://www.ietf.org/archive/id/draft-dekok-radext-review-radius-00.html
