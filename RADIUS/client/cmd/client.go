@@ -47,12 +47,20 @@ func testPAP(ctx context.Context, addr, secret, username, password string) (radi
 	if err := rfc2865.UserPassword_SetString(pkt, password); err != nil { // set User-Password attribute
 		return 0, fmt.Errorf("UserPassword_Set: %w", err)
 	}
-	log.Printf("[DEBUG] Access-Request (PAP)  pkt=%+v  user=%q  addr=%s", pkt, username, addr)
+	log.Printf("[DEBUG] -> Access-Request to server pkt=%+v  user=%q  addr=%s", pkt, username, addr)
+	
+	// Marshal the packet to raw bytes for logging
+	raw, err := pkt.MarshalBinary()
+	if err != nil {
+		return 0, fmt.Errorf("marshal radius packet: %w", err)
+	}
+	log.Printf("[DEBUG] -> raw RADIUS packet to server (%d bytes):\n%x\n", len(raw), raw)
+	
 	resp, err := radius.Exchange(ctx, pkt, addr) // send the request and wait for response
 	if err != nil {
 		return 0, err
 	}
-	log.Printf("← %v", resp.Code)
+	log.Printf("[DEBUG] <- Access-Response from server=%v", resp)
 	return resp.Code, nil
 }
 
@@ -72,7 +80,7 @@ func testEAPMD5(ctx context.Context, addr, secret, username, password string) (r
 	if err != nil {
 		return 0, err
 	}
-	log.Printf("← %v", chalPkt.Code)
+	log.Printf("[DEBUG] received Access-Challenge  code=%v", chalPkt.Code)
 
 	if chalPkt.Code != radius.CodeAccessChallenge {
 		return chalPkt.Code, fmt.Errorf("expected Access-Challenge, got %v", chalPkt.Code)
@@ -109,7 +117,7 @@ func testEAPMD5(ctx context.Context, addr, secret, username, password string) (r
 	rfc2869.EAPMessage_Set(pkt2, buildEAP(eapResponse, chalID, md5Body))
 	rfc2865.State_Set(pkt2, rfc2865.State_Get(chalPkt)) // echo State back
 
-	log.Printf("→ Access-Request (EAP-Response/MD5)  eapID=%d", chalID)
+	log.Printf("Access-Request (EAP-Response/MD5)  eapID=%d", chalID)
 	result, err := radius.Exchange(ctx, pkt2, addr)
 	if err != nil {
 		return 0, err
