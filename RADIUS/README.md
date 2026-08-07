@@ -95,10 +95,26 @@ Supplicant            Клиент (NAS)                    RADIUS Сервер
 
 Что дальше
 > Динамическая авторизация — CoA и Disconnect (RFC 3576 / RFC 5176). Суть: Раньше RADIUS-сервер был пассивным: он только отвечал на запросы NAS. RFC ввел CoA (Change of Authorization) и Disconnect Messages. Теперь RADIUS-сервер сам может отправить на NAS пакет: "Сбрось этого пользователя прямо сейчас" (Disconnect-Request) или "Поменяй ему VLAN/скорость на лету" (CoA-Request)
-> Переход на EAP и защита от подделки (RFC 3579). Суть: Отказ от передачи открытых/маскированных MD5 паролей в пользу EAP (Extensible Authentication Protocol)
 > RadSec: RADIUS over TLS / DTLS (RFC 6614). Суть: Завернуть весь RADIUS-трафик в безопасный туннель (TLS по TCP или DTLS по UDP).
+    TLS https://www.rfc-editor.org/info/rfc6614/
+    DTLS https://www.rfc-editor.org/info/rfc7360/
 > Diameter: Наследник нового поколения (RFC 3588 / RFC 6733). Суть: Полный отказ от RADIUS в пользу переработанного с нуля протокола (Diameter = «в два раза больше, чем Radius»).
 
+### Модель угроз
+- подделка Access-Request. 
+    Уязвимо: если используется нативные сценарии PAP, CHAP, MS-CHAP. 
+    Безопасно: пакеты Access-Request, не содержащие атрибут Message-Authenticator, могут быть легко подделаны. Чтобы избежать этой проблемы, серверные реализации могут быть настроены таким образом, чтобы требовать наличия атрибута Message-Authenticator во всех пакетах Access-Request. Запросы, не содержащие атрибут Message-Authenticator, ДОЛЖНЫ быть молча отброшены. Даже в сценариях с EAP (EAP-MD5, EAP-TLS, PEAP, EAP-TTLS, EAP-MSCHAPv2 и т.д.), а также в запросах CoA (Change of Authorization) или Disconnect-Request
+- BlastRADIUS. перехват и оффлан брутфорс секретов / паролей передаваемых через RADIUS
+    Уязвимо: если используется нативные сценарии PAP, CHAP, MS-CHAP. см https://www.ietf.org/archive/id/draft-dekok-radext-review-radius-00.html#section-5.2; https://datatracker.ietf.org/doc/html/draft-ietf-radext-deprecating-radius-07; https://www.ietf.org/archive/id/draft-dekok-radext-review-radius-00.html#section-3.1
+    Безопасно: 
+    - RadSec RADIUS over TLS / DTLS / IPsec (часто невозможно реализовать т.к. зависит от канала и инфораструктуры). Или
+    - Серверы обязаны включать Message-Authenticor в качестве первого атрибута во все ответы на пакеты Access-Request, а также отбрасывать пакеты, в которых он отсутствует.
+    - Флаг "limit Proxy-State" позволяет серверам обнаруживать и предотвращать атаки, когда пакеты Access-Request не содержат Message-Authenticator. Эта конфигурация необходима только в том случае, если сервер является прокси-сервером. Включение флага "limit Proxy-State" позволяет использовать устаревшие клиенты без существенного ущерба для безопасности
+    - Логировать отсутствие Message-Authenticator, использование UDP без защищенного транспорта, слабые Shared Secret и устаревшие методы аутентификации
+- Metainfo leakedge. Утечка атрибутов сеанса такие как MAC адреса, IP, имена устройств, NAS-Identifier, Location, кол-во трафика и т.п.
+- Использование атрибута Tunnel-Password в пакетах CoA-Request и Disconnect-Request. Tunnel-Password шифруется с помощью Salt см. раздел 3.5 (RFC2868) с длиной 15 символов
+- Атаки на MS-CHAP https://www.ietf.org/archive/id/draft-dekok-radext-review-radius-00.html#section-5.2
+- Длина общего секрета. Любой Shared Secret длиной ≤8 символов следует считать уже скомпрометированным. Минимально 32-64 random bytes
 
 # Источники
 https://www.ietf.org/archive/id/draft-dekok-radext-review-radius-00.html
