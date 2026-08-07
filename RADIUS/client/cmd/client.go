@@ -48,14 +48,14 @@ func testPAP(ctx context.Context, addr, secret, username, password string) (radi
 		return 0, fmt.Errorf("UserPassword_Set: %w", err)
 	}
 	log.Printf("[DEBUG] -> Access-Request to server pkt=%+v  user=%q  addr=%s", pkt, username, addr)
-	
+
 	// Marshal the packet to raw bytes for logging
 	raw, err := pkt.MarshalBinary()
 	if err != nil {
 		return 0, fmt.Errorf("marshal radius packet: %w", err)
 	}
 	log.Printf("[DEBUG] -> raw RADIUS packet to server (%d bytes):\n%x\n", len(raw), raw)
-	
+
 	resp, err := radius.Exchange(ctx, pkt, addr) // send the request and wait for response
 	if err != nil {
 		return 0, err
