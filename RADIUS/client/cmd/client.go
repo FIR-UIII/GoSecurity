@@ -32,11 +32,11 @@ func buildEAP(code, id byte, body []byte) []byte {
 	pkt := make([]byte, 4+len(body))
 	pkt[0] = code
 	pkt[1] = id
-	l := uint16(len(pkt))
-	pkt[2] = byte(l >> 8)
-	pkt[3] = byte(l)
+	len := uint16(len(pkt))
+	pkt[2] = byte(len >> 8)
+	pkt[3] = byte(len)
 	copy(pkt[4:], body)
-	fmt.Printf("[DEBUG] buildEAP: code=%d id=%d len=%d body=%x\n", code, id, l, body)
+	fmt.Printf("[DEBUG] buildEAP: code=%d id=%d len=%d body=%x\n", code, id, len, body)
 	return pkt
 }
 
