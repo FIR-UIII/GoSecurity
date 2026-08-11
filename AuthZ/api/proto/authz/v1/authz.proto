@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package authz.v1;
+
+// Путь импорта Go + имя Go-пакета после точки с запятой.
+// authzv1 короче, чем сгенерированное по умолчанию "v1", и не конфликтует
+// с другими v1-пакетами при импорте.
+option go_package = "authz-example/gen/authz/v1;authzv1";
+
+// AuthorizationService — PDP (Policy Decision Point).
+// Клиент (PEP — Policy Enforcement Point) спрашивает "можно ли субъекту
+// сделать действие над ресурсом", сервис отвечает решением.
+service AuthorizationService {
+  rpc Check(CheckRequest) returns (CheckResponse);
+}
+
+// Subject — кто выполняет действие.
+// Тип и id разделены намеренно: строку "user:alice" пришлось бы парсить
+// на каждом слое, а id вроде "svc:billing:v2" сломал бы парсинг двоеточием.
+message Subject {
+  string type = 1; // "user", "service", "group"
+  string id = 2;   // "alice", "billing"
+}
+
+// Resource — над чем выполняется действие.
+message Resource {
+  string type = 1; // "document", "repository"
+  string id = 2;   // "42"
+}
+
+message CheckRequest {
+  Subject subject = 1;
+  string action = 2; // "read", "write", "delete"
+  Resource resource = 3;
+
+  // Дополнительные атрибуты запроса (ip, время, tenant).
+  // Пока map<string,string>; когда понадобятся вложенные структуры и числа —
+  // заменим на google.protobuf.Struct.
+  map<string, string> context = 4;
+}
+
+message CheckResponse {
+  bool allowed = 1;
+
+  // Человекочитаемое объяснение решения.
+  // ВАЖНО: сюда нельзя класть внутренние детали (содержимое ресурса, секреты,
+  // список чужих ролей) — ответ уходит клиенту и это канал утечки информации.
+  string reason = 2;
+
+  string policy_id = 3;   // какая политика приняла решение
+  string decision_id = 4; // корреляция ответа с записью в decision-логе
+}
