@@ -15,15 +15,17 @@ type server struct {
 	pb.UnimplementedAuthorizationServiceServer
 }
 
-func (s *server) Check(ctx context.Context, req *pb.CheckRequest) (*pb.CheckResponse, error) {
+func (s *server) Check(ctx context.Context, req *pb.CheckRequest) (res *pb.CheckResponse, err error) {
 	if req.Action == "read" {
-		return &pb.CheckResponse{
+		res = &pb.CheckResponse{
 			Allowed: true,
-		}, nil
+		}
+		return res, nil
 	}
-	return &pb.CheckResponse{
+	res = &pb.CheckResponse{
 		Allowed: false,
-	}, nil
+	}
+	return res, nil
 }
 
 func main() {
