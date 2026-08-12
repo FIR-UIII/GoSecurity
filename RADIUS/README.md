@@ -318,6 +318,56 @@ sequenceDiagram
 * Request Authenticator = 16 нулей (0x00...00): Поскольку за целостность и аутентификацию источника теперь отвечает слой TLS, поле Request Authenticator в Access-Request больше не нужно защищать с помощью Shared Secret. RFC 6614 предписывает заполнять его нулями.
 * Message-Authenticator (Attr 80) и Shared Secret: Для локальных подключений Shared Secret становится формальностью (часто задается значением radsec). Однако если запрос передается дальше через цепочку RadSec-прокси, Message-Authenticator сохраняется для сквозной проверки.
 
+### Аутентификация
+PAP, CHAP и MS-CHAP — это методы аутентификации, которые инкапсулируются внутрь пакета RADIUS Access-Request в виде специфичных атрибутов (Attributes).
+
+##### PAP (Password Authentication Protocol)
+```
+Code: Access-Request (1)
+Identifier: 42
+Authenticator: <16-byte random>
+Attributes:
+  User-Name (Type 1) = "john.doe"
+  User-Password (Type 2) = <зашифрованный с помощью Shared Secret пароль "myP@ssw0rd">
+  NAS-IP-Address (Type 4) = 192.168.1.10
+```
+
+##### CHAP (Challenge Handshake Authentication Protocol)
+
+1. NAS (точка доступа, VPN-шлюз или коммутатор) генерирует случайную строку (Challenge) и отправляет клиенту.
+2. Клиент берет свой пароль, добавляет к нему Challenge, вычисляет MD5-хеш и отправляет этот хеш (Response) обратно.
+3. NAS упаковывает эти данные в RADIUS-запрос. Сервер RADIUS проделывает ту же математическую операцию со своей стороны (он должен знать пароль клиента в открытом виде из базы) и сравнивает хеши.
+
+```
+Code: Access-Request (1)
+Identifier: 43
+Authenticator: <16-byte random>
+Attributes:
+  User-Name (Type 1) = "john.doe"
+  CHAP-Challenge (Type 60) = <16-byte случайный вызов от NAS>
+  CHAP-Password (Type 3) = <1-byte CHAP ID> + <16-byte MD5 хеш от (ID + Password + Challenge)>
+  NAS-IP-Address (Type 4) = 192.168.1.10
+```
+
+##### MS-CHAP (v1 и v2)
+
+Ключевые отличия MS-CHAPv2 от обычного CHAP:<br>
+Двусторонняя аутентификация (Mutual Authentication): Не только сервер проверяет клиента, но и клиент проверяет сервер. В пакете ответа RADIUS Access-Accept сервер присылает свой криптографический ответ, чтобы клиент убедился, что это легитимный сервер, а не подделка (Rogue AP).<br>
+Использование NT-хешей: В отличие от CHAP, серверу RADIUS не нужно хранить пароли в чистом виде. Ему достаточно иметь NT-хеш пароля (MD4), что делает протокол идеальным для аутентификации через Active Directory.<br>
+В RADIUS эти данные передаются через атрибуты производителя (Vendor-Specific Attributes — VSA) от Microsoft.<br>
+
+```
+Code: Access-Request (1)
+Identifier: 44
+Authenticator: <16-byte random>
+Attributes:
+  User-Name (Type 1) = "john.doe"
+  Vendor-Specific (Type 26, Vendor ID 311 - Microsoft):
+    MS-CHAP-Challenge (Sub-Type 11) = <16-byte вызов от NAS>
+    MS-CHAP2-Response (Sub-Type 25) = <50-byte структура: CHAP ID + Flags + Peer Challenge + NT-Response>
+  NAS-IP-Address (Type 4) = 192.168.1.10
+```
+
 ### Динамическая авторизация — CoA и Disconnect (RFC 3576 / RFC 5176)
 Суть: Раньше RADIUS-сервер был пассивным: он только отвечал на запросы NAS. RFC ввел CoA (Change of Authorization) и Disconnect Messages. Теперь RADIUS-сервер сам может отправить на NAS пакет: "Сбрось этого пользователя прямо сейчас" (Disconnect-Request) или "Поменяй ему VLAN/скорость на лету" (CoA-Request)
 
