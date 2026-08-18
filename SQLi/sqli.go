@@ -57,6 +57,20 @@ func main() {
 	http.HandleFunc("/13/fake-prepare", vulnFakePrepare)
 
 	// --------------------------------------------------
+	// $1, $2 placeholders
+	// --------------------------------------------------
+
+	http.HandleFunc("/15/unsafe-placeholders", vulnPlaceholders)
+	http.HandleFunc("/15/safe-placeholders", safePlaceholders)
+
+	// --------------------------------------------------
+	// Dynamic table name with $1, $2
+	// --------------------------------------------------
+
+	http.HandleFunc("/16/unsafe-table", vulnTableName)
+	http.HandleFunc("/16/safe-table", safeTableName)
+
+	// --------------------------------------------------
 	// Second-order SQLi
 	// --------------------------------------------------
 
@@ -115,6 +129,21 @@ func initDB() {
 	}
 
 	_, err = db.Exec(`DELETE FROM saved_filters`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS resource_config_versions (
+			resource_config_scope_id TEXT,
+			version TEXT
+		)
+	`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`DELETE FROM resource_config_versions`)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -468,6 +497,117 @@ func vulnFakePrepare(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	writeUsers(w, rows)
+}
+
+// ======================================================
+// 15. $x, $y placeholders
+// ======================================================
+
+func vulnPlaceholders(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	query := "SELECT id, name, role FROM users WHERE name = $1"
+	query = strings.Replace(query, "$1", "'"+name+"'", 1)
+
+	logQuery(query)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
+func safePlaceholders(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	role := r.URL.Query().Get("role")
+
+	query := "SELECT id, name, role FROM users WHERE name = $1 AND role = $2"
+
+	logQuery(query)
+	log.Println("PARAMS:", name, role)
+
+	rows, err := db.Query(query, name, role)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
+// ======================================================
+// 16. Dynamic table name with $1, $2
+// ======================================================
+
+func vulnTableName(w http.ResponseWriter, r *http.Request) {
+	tableName := r.URL.Query().Get("table")
+	scopeID := r.URL.Query().Get("scope_id")
+	version := r.URL.Query().Get("version")
+
+	query := fmt.Sprintf(`
+		INSERT INTO %s (resource_config_scope_id, version)
+		VALUES ($1, $2)
+	`, tableName)
+
+	logQuery(query)
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	if _, err = tx.Exec(query, scopeID, version); err != nil {
+		_ = tx.Rollback()
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintln(w, "inserted")
+}
+
+func safeTableName(w http.ResponseWriter, r *http.Request) {
+	tableName := r.URL.Query().Get("table")
+	scopeID := r.URL.Query().Get("scope_id")
+	version := r.URL.Query().Get("version")
+
+	allowedTables := map[string]string{
+		"resource_config_versions": "resource_config_versions",
+	}
+
+	validatedTableName, ok := allowedTables[tableName]
+	if !ok {
+		http.Error(w, "invalid table", 400)
+		return
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO %s (resource_config_scope_id, version)
+		VALUES ($1, $2)
+	`, validatedTableName)
+
+	logQuery(query)
+	log.Println("PARAMS:", scopeID, version)
+
+	_, err := db.Exec(query, scopeID, version)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintln(w, "inserted")
 }
 
 // ======================================================
