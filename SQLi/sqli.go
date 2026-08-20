@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -27,63 +28,77 @@ func main() {
 	// SELECT
 	// --------------------------------------------------
 
-	http.HandleFunc("/01/concat", vulnConcat)
-	http.HandleFunc("/02/sprintf", vulnSprintf)
-	http.HandleFunc("/03/builder", vulnBuilder)
-	http.HandleFunc("/04/fprintf", vulnFprintf)
-	http.HandleFunc("/05/in", vulnIN)
-	http.HandleFunc("/06/like", vulnLIKE)
+	http.HandleFunc("/concat/unsafe", concatUnsafe)
+	http.HandleFunc("/concat/safe", concatSafe)
+
+	http.HandleFunc("/sprintf/unsafe", sprintfUnsafe)
+	http.HandleFunc("/sprintf/safe", sprintfSafe)
+
+	http.HandleFunc("/builder/unsafe", builderUnsafe)
+	http.HandleFunc("/builder/safe", builderSafe)
+
+	http.HandleFunc("/fprintf/unsafe", fprintfUnsafe)
+	http.HandleFunc("/fprintf/safe", fprintfSafe)
+
+	http.HandleFunc("/in/unsafe", inUnsafe)
+	http.HandleFunc("/in/safe", inSafe)
+
+	http.HandleFunc("/like/unsafe", likeUnsafe)
+	http.HandleFunc("/like/safe", likeSafe)
 
 	// --------------------------------------------------
 	// UPDATE / DELETE / INSERT
 	// --------------------------------------------------
 
-	http.HandleFunc("/07/update", vulnUPDATE)
-	http.HandleFunc("/08/delete", vulnDELETE)
-	http.HandleFunc("/09/insert", vulnINSERT)
+	http.HandleFunc("/update/unsafe", updateUnsafe)
+	http.HandleFunc("/update/safe", updateSafe)
+
+	http.HandleFunc("/delete/unsafe", deleteUnsafe)
+	http.HandleFunc("/delete/safe", deleteSafe)
+
+	http.HandleFunc("/insert/unsafe", insertUnsafe)
+	http.HandleFunc("/insert/safe", insertSafe)
 
 	// --------------------------------------------------
 	// Dynamic SQL
 	// --------------------------------------------------
 
-	http.HandleFunc("/10/order", vulnORDER)
-	http.HandleFunc("/11/limit", vulnLIMIT)
-	http.HandleFunc("/12/where", vulnWHERE)
+	http.HandleFunc("/order/unsafe", orderUnsafe)
+	http.HandleFunc("/order/safe", orderSafe)
+
+	http.HandleFunc("/limit/unsafe", limitUnsafe)
+	http.HandleFunc("/limit/safe", limitSafe)
+
+	http.HandleFunc("/where/unsafe", whereUnsafe)
+	http.HandleFunc("/where/safe", whereSafe)
 
 	// --------------------------------------------------
 	// Prepare incorrectly
 	// --------------------------------------------------
 
-	http.HandleFunc("/13/fake-prepare", vulnFakePrepare)
+	http.HandleFunc("/prepare/unsafe", prepareUnsafe)
+	http.HandleFunc("/prepare/safe", prepareSafe)
 
 	// --------------------------------------------------
 	// $1, $2 placeholders
 	// --------------------------------------------------
 
-	http.HandleFunc("/15/unsafe-placeholders", vulnPlaceholders)
-	http.HandleFunc("/15/safe-placeholders", safePlaceholders)
+	http.HandleFunc("/placeholders/unsafe", placeholdersUnsafe)
+	http.HandleFunc("/placeholders/safe", placeholdersSafe)
 
 	// --------------------------------------------------
 	// Dynamic table name with $1, $2
 	// --------------------------------------------------
 
-	http.HandleFunc("/16/unsafe-table", vulnTableName)
-	http.HandleFunc("/16/safe-table", safeTableName)
+	http.HandleFunc("/table/unsafe", tableUnsafe)
+	http.HandleFunc("/table/safe", tableSafe)
 
 	// --------------------------------------------------
 	// Second-order SQLi
 	// --------------------------------------------------
 
-	http.HandleFunc("/14/store", storeSecondOrder)
-	http.HandleFunc("/14/use", useSecondOrder)
-
-	// --------------------------------------------------
-	// Safe implementations
-	// --------------------------------------------------
-
-	http.HandleFunc("/safe/select", safeSelect)
-	http.HandleFunc("/safe/update", safeUpdate)
-	http.HandleFunc("/safe/order", safeOrder)
+	http.HandleFunc("/second-order/store", secondOrderStore)
+	http.HandleFunc("/second-order/use", secondOrderUse)
 
 	log.Println("SQLi lab listening on http://localhost:8080")
 
@@ -117,43 +132,13 @@ func initDB() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS saved_filters (
-			id INTEGER PRIMARY KEY,
-			filter TEXT
-		)
-	`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Exec(`DELETE FROM saved_filters`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS resource_config_versions (
-			resource_config_scope_id TEXT,
-			version TEXT
-		)
-	`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Exec(`DELETE FROM resource_config_versions`)
-	if err != nil {
-		log.Fatal(err)
-	}
 }
 
 // ======================================================
-// 01. String concatenation
+// String concatenation
 // ======================================================
 
-func vulnConcat(w http.ResponseWriter, r *http.Request) {
+func concatUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
 	query := "SELECT id, name, role FROM users WHERE name = '" +
@@ -173,11 +158,30 @@ func vulnConcat(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func concatSafe(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	query := "SELECT id, name, role FROM users WHERE name = ?"
+
+	logQuery(query)
+	log.Println("PARAM:", name)
+
+	rows, err := db.Query(query, name)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 02. fmt.Sprintf
+// fmt.Sprintf
 // ======================================================
 
-func vulnSprintf(w http.ResponseWriter, r *http.Request) {
+func sprintfUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
 	query := fmt.Sprintf(
@@ -198,11 +202,34 @@ func vulnSprintf(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func sprintfSafe(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	// Sprintf only builds the static placeholder text, never the value.
+	query := fmt.Sprintf(
+		"SELECT id, name, role FROM users WHERE name = %s",
+		"?",
+	)
+
+	logQuery(query)
+	log.Println("PARAM:", name)
+
+	rows, err := db.Query(query, name)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 03. strings.Builder
+// strings.Builder
 // ======================================================
 
-func vulnBuilder(w http.ResponseWriter, r *http.Request) {
+func builderUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
 	var query strings.Builder
@@ -230,11 +257,34 @@ func vulnBuilder(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func builderSafe(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	var query strings.Builder
+
+	query.WriteString("SELECT id, name, role FROM users WHERE name = ?")
+
+	sqlQuery := query.String()
+
+	logQuery(sqlQuery)
+	log.Println("PARAM:", name)
+
+	rows, err := db.Query(sqlQuery, name)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 04. fmt.Fprintf
+// fmt.Fprintf
 // ======================================================
 
-func vulnFprintf(w http.ResponseWriter, r *http.Request) {
+func fprintfUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
 	var query strings.Builder
@@ -260,11 +310,39 @@ func vulnFprintf(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func fprintfSafe(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	var query strings.Builder
+
+	// Fprintf only writes the static placeholder text, never the value.
+	fmt.Fprintf(
+		&query,
+		"SELECT id, name, role FROM users WHERE name = %s",
+		"?",
+	)
+
+	sqlQuery := query.String()
+
+	logQuery(sqlQuery)
+	log.Println("PARAM:", name)
+
+	rows, err := db.Query(sqlQuery, name)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 05. IN (...) + strings.Join
+// IN (...) + strings.Join
 // ======================================================
 
-func vulnIN(w http.ResponseWriter, r *http.Request) {
+func inUnsafe(w http.ResponseWriter, r *http.Request) {
 	names := r.URL.Query()["name"]
 
 	if len(names) == 0 {
@@ -290,11 +368,45 @@ func vulnIN(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func inSafe(w http.ResponseWriter, r *http.Request) {
+	names := r.URL.Query()["name"]
+
+	if len(names) == 0 {
+		http.Error(w, "name required", 400)
+		return
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+
+	query := fmt.Sprintf(
+		"SELECT id, name, role FROM users WHERE name IN (%s)",
+		placeholders,
+	)
+
+	args := make([]any, len(names))
+	for i, n := range names {
+		args[i] = n
+	}
+
+	logQuery(query)
+	log.Println("PARAMS:", names)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 06. LIKE
+// LIKE
 // ======================================================
 
-func vulnLIKE(w http.ResponseWriter, r *http.Request) {
+func likeUnsafe(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
 
 	query := fmt.Sprintf(
@@ -315,11 +427,31 @@ func vulnLIKE(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func likeSafe(w http.ResponseWriter, r *http.Request) {
+	search := r.URL.Query().Get("search")
+
+	query := "SELECT id, name, role FROM users WHERE name LIKE ?"
+	pattern := "%" + search + "%"
+
+	logQuery(query)
+	log.Println("PARAM:", pattern)
+
+	rows, err := db.Query(query, pattern)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 07. UPDATE
+// UPDATE
 // ======================================================
 
-func vulnUPDATE(w http.ResponseWriter, r *http.Request) {
+func updateUnsafe(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	role := r.URL.Query().Get("role")
 
@@ -340,11 +472,33 @@ func vulnUPDATE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "updated")
 }
 
+func updateSafe(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	role := r.URL.Query().Get("role")
+
+	query := `
+		UPDATE users
+		SET role = ?
+		WHERE id = ?
+	`
+
+	logQuery(query)
+	log.Println("PARAMS:", role, id)
+
+	_, err := db.Exec(query, role, id)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintln(w, "updated")
+}
+
 // ======================================================
-// 08. DELETE
+// DELETE
 // ======================================================
 
-func vulnDELETE(w http.ResponseWriter, r *http.Request) {
+func deleteUnsafe(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 
 	query := fmt.Sprintf(
@@ -363,11 +517,28 @@ func vulnDELETE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "deleted")
 }
 
+func deleteSafe(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	query := "DELETE FROM users WHERE id = ?"
+
+	logQuery(query)
+	log.Println("PARAM:", id)
+
+	_, err := db.Exec(query, id)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintln(w, "deleted")
+}
+
 // ======================================================
-// 09. INSERT
+// INSERT
 // ======================================================
 
-func vulnINSERT(w http.ResponseWriter, r *http.Request) {
+func insertUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	role := r.URL.Query().Get("role")
 
@@ -388,11 +559,29 @@ func vulnINSERT(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "inserted")
 }
 
+func insertSafe(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	role := r.URL.Query().Get("role")
+
+	query := "INSERT INTO users(name, role) VALUES(?, ?)"
+
+	logQuery(query)
+	log.Println("PARAMS:", name, role)
+
+	_, err := db.Exec(query, name, role)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintln(w, "inserted")
+}
+
 // ======================================================
-// 10. ORDER BY
+// ORDER BY
 // ======================================================
 
-func vulnORDER(w http.ResponseWriter, r *http.Request) {
+func orderUnsafe(w http.ResponseWriter, r *http.Request) {
 	sort := r.URL.Query().Get("sort")
 
 	query := fmt.Sprintf(
@@ -413,11 +602,44 @@ func vulnORDER(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func orderSafe(w http.ResponseWriter, r *http.Request) {
+	sort := r.URL.Query().Get("sort")
+
+	allowed := map[string]string{
+		"name": "name",
+		"id":   "id",
+		"role": "role",
+	}
+
+	column, ok := allowed[sort]
+	if !ok {
+		http.Error(w, "invalid sort", 400)
+		return
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, name, role FROM users ORDER BY %s",
+		column,
+	)
+
+	logQuery(query)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 11. LIMIT
+// LIMIT
 // ======================================================
 
-func vulnLIMIT(w http.ResponseWriter, r *http.Request) {
+func limitUnsafe(w http.ResponseWriter, r *http.Request) {
 	limit := r.URL.Query().Get("limit")
 
 	query := fmt.Sprintf(
@@ -438,11 +660,34 @@ func vulnLIMIT(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func limitSafe(w http.ResponseWriter, r *http.Request) {
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 0 {
+		http.Error(w, "invalid limit", 400)
+		return
+	}
+
+	query := "SELECT id, name, role FROM users LIMIT ?"
+
+	logQuery(query)
+	log.Println("PARAM:", limit)
+
+	rows, err := db.Query(query, limit)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 12. Dynamic WHERE
+// Dynamic WHERE
 // ======================================================
 
-func vulnWHERE(w http.ResponseWriter, r *http.Request) {
+func whereUnsafe(w http.ResponseWriter, r *http.Request) {
 	field := r.URL.Query().Get("field")
 	value := r.URL.Query().Get("value")
 
@@ -465,11 +710,47 @@ func vulnWHERE(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func whereSafe(w http.ResponseWriter, r *http.Request) {
+	field := r.URL.Query().Get("field")
+	value := r.URL.Query().Get("value")
+
+	allowed := map[string]string{
+		"name":  "name",
+		"role":  "role",
+		"email": "email",
+		"id":    "id",
+	}
+
+	column, ok := allowed[field]
+	if !ok {
+		http.Error(w, "invalid field", 400)
+		return
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, name, role FROM users WHERE %s = ?",
+		column,
+	)
+
+	logQuery(query)
+	log.Println("PARAM:", value)
+
+	rows, err := db.Query(query, value)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 13. Prepare too late
+// Prepare too late
 // ======================================================
 
-func vulnFakePrepare(w http.ResponseWriter, r *http.Request) {
+func prepareUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
 	// Vulnerability already happened here.
@@ -499,11 +780,38 @@ func vulnFakePrepare(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
+func prepareSafe(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	query := "SELECT id, name, role FROM users WHERE name = ?"
+
+	logQuery(query)
+	log.Println("PARAM:", name)
+
+	stmt, err := db.Prepare(query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer stmt.Close()
+
+	rows, err := stmt.Query(name)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	writeUsers(w, rows)
+}
+
 // ======================================================
-// 15. $x, $y placeholders
+// $x, $y placeholders
 // ======================================================
 
-func vulnPlaceholders(w http.ResponseWriter, r *http.Request) {
+func placeholdersUnsafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
 	query := "SELECT id, name, role FROM users WHERE name = $1"
@@ -522,7 +830,7 @@ func vulnPlaceholders(w http.ResponseWriter, r *http.Request) {
 	writeUsers(w, rows)
 }
 
-func safePlaceholders(w http.ResponseWriter, r *http.Request) {
+func placeholdersSafe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	role := r.URL.Query().Get("role")
 
@@ -543,16 +851,16 @@ func safePlaceholders(w http.ResponseWriter, r *http.Request) {
 }
 
 // ======================================================
-// 16. Dynamic table name with $1, $2
+// Dynamic table name with $1, $2
 // ======================================================
 
-func vulnTableName(w http.ResponseWriter, r *http.Request) {
+func tableUnsafe(w http.ResponseWriter, r *http.Request) {
 	tableName := r.URL.Query().Get("table")
-	scopeID := r.URL.Query().Get("scope_id")
-	version := r.URL.Query().Get("version")
+	name := r.URL.Query().Get("name")
+	email := r.URL.Query().Get("email")
 
 	query := fmt.Sprintf(`
-		INSERT INTO %s (resource_config_scope_id, version)
+		INSERT INTO %s (name, email)
 		VALUES ($1, $2)
 	`, tableName)
 
@@ -564,7 +872,7 @@ func vulnTableName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err = tx.Exec(query, scopeID, version); err != nil {
+	if _, err = tx.Exec(query, name, email); err != nil {
 		_ = tx.Rollback()
 		http.Error(w, err.Error(), 500)
 		return
@@ -578,13 +886,13 @@ func vulnTableName(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "inserted")
 }
 
-func safeTableName(w http.ResponseWriter, r *http.Request) {
+func tableSafe(w http.ResponseWriter, r *http.Request) {
 	tableName := r.URL.Query().Get("table")
-	scopeID := r.URL.Query().Get("scope_id")
-	version := r.URL.Query().Get("version")
+	name := r.URL.Query().Get("name")
+	email := r.URL.Query().Get("email")
 
 	allowedTables := map[string]string{
-		"resource_config_versions": "resource_config_versions",
+		"users": "users",
 	}
 
 	validatedTableName, ok := allowedTables[tableName]
@@ -594,14 +902,14 @@ func safeTableName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := fmt.Sprintf(`
-		INSERT INTO %s (resource_config_scope_id, version)
+		INSERT INTO %s (name, email)
 		VALUES ($1, $2)
 	`, validatedTableName)
 
 	logQuery(query)
-	log.Println("PARAMS:", scopeID, version)
+	log.Println("PARAMS:", name, email)
 
-	_, err := db.Exec(query, scopeID, version)
+	_, err := db.Exec(query, name, email)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -611,16 +919,17 @@ func safeTableName(w http.ResponseWriter, r *http.Request) {
 }
 
 // ======================================================
-// 14. Second-order SQLi
+// Second-order SQLi
 // ======================================================
 
-// First request stores attacker-controlled data.
+// First request stores attacker-controlled data safely, as a marker row
+// in the users table (email column holds the stored filter).
 
-func storeSecondOrder(w http.ResponseWriter, r *http.Request) {
+func secondOrderStore(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("filter")
 
 	_, err := db.Exec(
-		"INSERT INTO saved_filters(filter) VALUES(?)",
+		"INSERT INTO users(name, role, email) VALUES('_filter', 'meta', ?)",
 		filter,
 	)
 
@@ -634,11 +943,11 @@ func storeSecondOrder(w http.ResponseWriter, r *http.Request) {
 
 // Later the stored value becomes SQL code.
 
-func useSecondOrder(w http.ResponseWriter, r *http.Request) {
+func secondOrderUse(w http.ResponseWriter, r *http.Request) {
 	var filter string
 
 	err := db.QueryRow(
-		"SELECT filter FROM saved_filters ORDER BY id DESC LIMIT 1",
+		"SELECT email FROM users WHERE name = '_filter' ORDER BY id DESC LIMIT 1",
 	).Scan(&filter)
 
 	if err != nil {
@@ -649,96 +958,6 @@ func useSecondOrder(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf(
 		"SELECT id, name, role FROM users WHERE %s",
 		filter,
-	)
-
-	logQuery(query)
-
-	rows, err := db.Query(query)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	defer rows.Close()
-
-	writeUsers(w, rows)
-}
-
-// ======================================================
-// SAFE SELECT
-// ======================================================
-
-func safeSelect(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
-
-	query := `
-		SELECT id, name, role
-		FROM users
-		WHERE name = ?
-	`
-
-	logQuery(query)
-	log.Println("PARAM:", name)
-
-	rows, err := db.Query(query, name)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	defer rows.Close()
-
-	writeUsers(w, rows)
-}
-
-// ======================================================
-// SAFE UPDATE
-// ======================================================
-
-func safeUpdate(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	role := r.URL.Query().Get("role")
-
-	query := `
-		UPDATE users
-		SET role = ?
-		WHERE id = ?
-	`
-
-	logQuery(query)
-	log.Println("PARAMS:", role, id)
-
-	_, err := db.Exec(query, role, id)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	fmt.Fprintln(w, "updated")
-}
-
-// ======================================================
-// SAFE ORDER BY
-// ======================================================
-
-func safeOrder(w http.ResponseWriter, r *http.Request) {
-	sort := r.URL.Query().Get("sort")
-
-	allowed := map[string]string{
-		"name": "name",
-		"id":   "id",
-		"role": "role",
-	}
-
-	column, ok := allowed[sort]
-	if !ok {
-		http.Error(w, "invalid sort", 400)
-		return
-	}
-
-	query := fmt.Sprintf(
-		"SELECT id, name, role FROM users ORDER BY %s",
-		column,
 	)
 
 	logQuery(query)
