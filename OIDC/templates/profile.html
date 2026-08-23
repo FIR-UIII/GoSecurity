@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Demo RP - Profile</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 780px; margin: 40px auto; color: #222; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    pre { background: #0d1117; color: #c9d1d9; padding: 14px; border-radius: 6px; overflow-x: auto; }
+    ol { line-height: 1.9; }
+    .tok { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Logged in</h1>
+
+  <div class="card">
+    <h2>Authorization Code Flow handshake</h2>
+    <ol>
+      {{range .Log}}<li>{{.}}</li>{{end}}
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>ID token claims (signature NOT verified - demo only)</h2>
+    <pre>{{.ClaimsJSON}}</pre>
+  </div>
+
+  <div class="card">
+    <h2>Access token (truncated)</h2>
+    <p class="tok"><code>{{.AccessTokenShort}}</code></p>
+  </div>
+</body>
+</html>

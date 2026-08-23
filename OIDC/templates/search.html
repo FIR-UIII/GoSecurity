@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Demo RP - Search</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 780px; margin: 40px auto; color: #222; }
+  </style>
+</head>
+<body>
+  <h1>Search results</h1>
+  <!-- VULNERABLE ON PURPOSE: .QueryUnsafe is injected without HTML-escaping. -->
+  <p>No results for: {{.QueryUnsafe}}</p>
+  <p><a href="/">back</a></p>
+</body>
+</html>

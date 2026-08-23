@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Signing you in...</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 780px; margin: 40px auto; color: #222; }
+  </style>
+</head>
+<body>
+  <h1>Completing sign-in...</h1>
+  <p>Please wait, this only takes a moment.</p>
+
+  <!--
+    VULNERABLE ON PURPOSE: this models a real app that embeds a third-party
+    widget (analytics/ads/chat) on its OIDC callback landing page. Because
+    the page's own URL still contains the authorization code in the query
+    string, that third party's <img>/<script> request leaks it via the
+    request URL/Referer before the app ever redeems it.
+  -->
+  <img src="{{.BeaconURL}}" alt="" width="1" height="1" style="display:none">
+
+  <script>
+    // Simulates the app's own JS finishing the login a moment later - the
+    // delay is what lets a faster attacker win the race to redeem the code.
+    setTimeout(function () {
+      window.location.href = {{.FinishURL}};
+    }, 1500);
+  </script>
+</body>
+</html>
