@@ -13,16 +13,13 @@ import (
 const (
 	keycloakAuth  = "http://127.0.0.1:8080/realms/demo/protocol/openid-connect/auth"
 	keycloakToken = "http://127.0.0.1:8080/realms/demo/protocol/openid-connect/token"
-
-	clientID     = "demo-conf" // CHANGE_ME
-	clientSecret = "..."       // CHANGE_ME
-
-	callbackURL = "http://127.0.0.1:8000/oauth/callback"
+	clientID      = "demo-conf"                        // CHANGE_ME
+	clientSecret  = "yrExnAIz3V6CoUz19kFPgzmjGX7sj2DG" // CHANGE_ME
+	callbackURL   = "http://127.0.0.1:8000/oauth/callback"
 )
 
 func main() {
 	mux := http.NewServeMux()
-
 	mux.HandleFunc("/", home)
 	mux.HandleFunc("/login", login)
 	mux.HandleFunc("/oauth/callback", callback)
@@ -40,7 +37,6 @@ func main() {
 func home(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `
 		<h1>local</h1>
-
 		<a href="/login">Login with Keycloak</a>
 	`)
 }
@@ -72,15 +68,10 @@ func callback(w http.ResponseWriter, r *http.Request) {
 
 	if code == "" {
 		// Это происходит при fragment response.
-		//
 		// Browser загрузит эту страницу как:
-		//
 		// /oauth/callback#code=ABC
-		//
 		// но сервер увидит только:
-		//
 		// GET /oauth/callback
-		//
 		fmt.Fprint(w, `
 			<!doctype html>
 			<html>
@@ -96,15 +87,10 @@ func callback(w http.ResponseWriter, r *http.Request) {
 	log.Println("[RP] Authorization code received")
 	log.Println(code)
 
-	//
 	// INTENTIONALLY VULNERABLE:
-	//
 	// state не проверяется.
-	//
 	// В production здесь должна быть проверка:
-	//
 	// state -> browser session -> OAuth transaction
-	//
 
 	token, err := exchangeCode(code)
 
@@ -116,16 +102,13 @@ func callback(w http.ResponseWriter, r *http.Request) {
 			"token exchange failed",
 			http.StatusBadRequest,
 		)
-
 		return
 	}
 
 	log.Println("[RP] Keycloak token exchange successful")
 	log.Println("[RP] token:", token)
 
-	//
 	// Создаём application session.
-	//
 	sessionID := fmt.Sprintf(
 		"lab-session-%d",
 		time.Now().UnixNano(),
@@ -136,19 +119,16 @@ func callback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session",
 		Value: sessionID,
-
-		Path: "/",
-
+		Path:  "/",
 		// Именно это демонстрирует,
 		// почему HttpOnly не спасает
 		// от server-side callback атаки.
+		// CORS не поможет, потому что
+		// браузер не делает cross-origin
 		HttpOnly: true,
-
-		Secure: false,
-
+		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
-
-		MaxAge: 3600,
+		MaxAge:   3600,
 	})
 
 	fmt.Fprint(w, `

