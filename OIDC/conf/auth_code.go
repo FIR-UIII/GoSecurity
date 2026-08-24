@@ -14,8 +14,8 @@ const (
 	keycloakAuth  = "http://127.0.0.1:8080/realms/demo/protocol/openid-connect/auth"
 	keycloakToken = "http://127.0.0.1:8080/realms/demo/protocol/openid-connect/token"
 
-	clientID     = "demo-conf"
-	clientSecret = "VFqbDt5XxrTfZpQVqQPtSjU8BYad9EyD"
+	clientID     = "demo-conf" // CHANGE_ME
+	clientSecret = "..."       // CHANGE_ME
 
 	callbackURL = "http://127.0.0.1:8000/oauth/callback"
 )
@@ -39,17 +39,9 @@ func main() {
 
 func home(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `
-		<h1>Go OAuth Lab</h1>
+		<h1>local</h1>
 
 		<a href="/login">Login with Keycloak</a>
-
-		<hr>
-
-		<h2>Lab XSS</h2>
-
-		<script>
-			// Намеренно оставлено место для XSS-эксперимента.
-		</script>
 	`)
 }
 
@@ -167,7 +159,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 		<h1>OAuth login completed</h1>
 
 		<p>Application session created.</p>
-
+		<a href="/api/me">Check session</a>
 		</body>
 		</html>
 		`)
@@ -223,15 +215,15 @@ func lab(w http.ResponseWriter, r *http.Request) {
 <!doctype html>
 <html>
 <head>
-	<title>OAuth XSS Lab</title>
+	<title>Vuln page</title>
 </head>
 
 <body>
 
-<h1>OAuth XSS Lab</h1>
+<h1>Vuln page</h1>
 
 <p>
-Paste XSS payload below:
+Paste below:
 </p>
 
 <form action="/search" method="GET">
@@ -240,7 +232,7 @@ Paste XSS payload below:
 		name="q"
 		rows="20"
 		cols="100"
-		placeholder="Paste JavaScript payload here..."
+		placeholder="Paste PoC here..."
 	></textarea>
 
 	<br><br>
