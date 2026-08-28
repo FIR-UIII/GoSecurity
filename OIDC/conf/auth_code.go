@@ -59,10 +59,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	params.Set("scope", "openid")
 	params.Set("redirect_uri", callbackURL)
 	params.Set("state", state)
-	params.Set("response_mode", "query")
-	// Для лаборатории можно использовать prompt=none,
-	// если в браузере уже есть Keycloak SSO session.
-	// params.Set("prompt", "none")
+	params.Set("response_mode", "query") // запрос иде через классический query параметр
 
 	target := keycloakAuth + "?" + params.Encode()
 	http.Redirect(w, r, target, http.StatusFound)
@@ -127,8 +124,6 @@ func callback(w http.ResponseWriter, r *http.Request) {
 		// Именно это демонстрирует,
 		// почему HttpOnly не спасает
 		// от server-side callback атаки.
-		// CORS не поможет, потому что
-		// браузер не делает cross-origin
 		HttpOnly: true,
 		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
