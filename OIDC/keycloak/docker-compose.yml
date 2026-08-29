@@ -1,0 +1,24 @@
+# Local Keycloak that acts as the IdP for all three XSS -> ATO scenarios.
+#
+#   docker compose -f keycloak/docker-compose.yml up
+#
+# Admin console:  http://127.0.0.1:8080/  (admin / admin)
+# Realm:          xss-ato
+# Users:          victim / victim   and   attacker / attacker
+#
+# The realm (with the three deliberately (mis)configured clients) is imported
+# from realm-export.json on every start.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: kc-xss-ato
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./realm-export.json:/opt/keycloak/data/import/realm-export.json:ro

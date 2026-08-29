@@ -1,5 +1,13 @@
 # OIDC Authorization Code Flow demo (Keycloak) + XSS token-theft lab
 
+> **See also:** [`s1-implicit-flow/`](s1-implicit-flow/),
+> [`s2-confidential-no-pkce/`](s2-confidential-no-pkce/),
+> [`s3-spa-pkce/`](s3-spa-pkce/) — three self-contained Go PoCs reproducing the
+> XSS→ATO SSO gadgets from
+> <https://security.lauritz-holtmann.de/post/xss-ato-gadgets/>. Shared Keycloak
+> setup for those is in [`keycloak/`](keycloak/); details at the bottom of this
+> file.
+
 This is a local teaching lab, not a tool for attacking real systems. It has
 two pieces:
 
@@ -164,3 +172,88 @@ While still logged into Keycloak in your browser (active SSO session):
 - Framing protections (`X-Frame-Options: DENY` / `Content-Security-Policy:
   frame-ancestors 'none'`) on the RP would have stopped the hidden iframe
   from loading `/conf/login` cross-site in the first place.
+
+---
+
+# SSO gadgets lab — XSS → account takeover (3 standalone scenarios)
+
+Reproduces the three gadgets from
+<https://security.lauritz-holtmann.de/post/xss-ato-gadgets/>. Each scenario is
+its own directory with its own `go.mod`, a victim RP (`main.go`) and an
+attacker server (`attacker/main.go`), plus a `readme.md`:
+
+| dir | IdP client (mis)config | what the XSS does |
+|-----|------------------------|-------------------|
+| [`s1-implicit-flow/`](s1-implicit-flow/) | code+PKCE client, but implicit flow left enabled | silent `response_type=token&prompt=none` → `access_token` from the URL fragment |
+| [`s2-confidential-no-pkce/`](s2-confidential-no-pkce/) | confidential client, code flow, no PKCE, no `state` binding | silent `response_type=code&response_mode=fragment` → leak `code` → authorization-code **injection** into the RP's own callback → victim session cookie |
+| [`s3-spa-pkce/`](s3-spa-pkce/) | public SPA client, code flow, PKCE **S256 enforced** | payload generates its **own** PKCE pair, leaks `code` from the fragment, redeems it at the token endpoint (public client, no secret) → `access_token` |
+
+Ports: RPs `8101/8102/8103`, attackers `9101/9102/9103`, Keycloak `8080`.
+
+## Preconditions (same as the article)
+
+1. Victim has an **active session** at the IdP (in the lab: log in once at the
+   RP's `/login` as `victim` / `victim`).
+2. Victim previously **consented** to the client — disabled in the lab
+   (`consentRequired: false`) so the flow is fully silent.
+3. IdP supports **`prompt=none`** — Keycloak does.
+
+## 1. Start Keycloak (Docker)
+
+```sh
+docker compose -f keycloak/docker-compose.yml up
+```
+
+Keycloak 26 on <http://127.0.0.1:8080> (`admin` / `admin`). The realm
+`xss-ato` — with the three deliberately (mis)configured clients and the
+`victim` / `attacker` users — is imported from
+[`keycloak/realm-export.json`](keycloak/realm-export.json) on startup.
+
+*Already running a Keycloak on 8080* (e.g. the one for `s4-dirty-dance/`)?
+Don't use the compose file — load the realm into that instance instead:
+
+```sh
+bash keycloak/setup.sh
+```
+
+It (re)creates the `xss-ato` realm from `realm-export.json` and force-sets the
+`victim` / `attacker` passwords via the admin API. Safe to re-run.
+
+## 2. Run a scenario
+
+```sh
+cd s1-implicit-flow        # or s2-confidential-no-pkce / s3-spa-pkce
+go run .                   # victim RP
+go run ./attacker          # attacker server (separate terminal)
+```
+
+Then follow that directory's `readme.md`: log in as `victim` at the RP, open
+the attacker page, click the reflected-XSS link, watch the attacker console /
+`/loot` show the victim's token (or session) and a `userinfo` response with
+`preferred_username: victim`.
+
+### Troubleshooting
+
+* **Attacker `/loot` says `gadget FAILED: login_required`** — the victim has no
+  active Keycloak session. Open the RP's `/login` and sign in as
+  `victim` / `victim` *first*, then re-open the XSS link.
+* **The RP login itself says "Invalid username or password"** — the realm
+  users lost their password (happens when the realm was loaded over the admin
+  REST API rather than `--import-realm`). Run `bash keycloak/setup.sh`.
+* **`/loot` shows nothing at all** — the payload didn't run: check the RP is on
+  the expected port and that `/search` reflects `q` unescaped (`curl
+  "http://127.0.0.1:8101/search?q=<b>x"` should echo a raw `<b>`).
+
+## Mitigations (all three)
+
+- Use the **code flow with PKCE** for every client and **disable every unused
+  `response_type`** (kills gadget 1).
+- **Bind and verify `state`/`nonce`** to the browser session; keep
+  `response_mode=query` and redeem the `code` server-side in the same request
+  (kills gadget 2).
+- For SPAs, keep tokens out of page JS — **token-mediating backend (BFF)** or a
+  **service worker** (OAuth 2.0 for Browser-Based Apps BCP) (limits gadget 3).
+- Evaluate whether the client needs **`prompt=none`** at all; disable if not.
+- And the root cause: **no XSS** — output encoding, strict CSP,
+  `frame-ancestors 'none'`. The gadgets only turn "XSS in the app" into "full
+  account takeover".

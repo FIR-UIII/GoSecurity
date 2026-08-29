@@ -1,0 +1,97 @@
+{
+  "realm": "xss-ato",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "accessTokenLifespan": 300,
+  "users": [
+    {
+      "username": "victim",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "victim@example.com",
+      "firstName": "Vic",
+      "lastName": "Tim",
+      "requiredActions": [],
+      "credentials": [
+        { "type": "password", "value": "victim", "temporary": false }
+      ]
+    },
+    {
+      "username": "attacker",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "attacker@evil.example",
+      "firstName": "Mal",
+      "lastName": "Lory",
+      "requiredActions": [],
+      "credentials": [
+        { "type": "password", "value": "attacker", "temporary": false }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "s1-implicit",
+      "name": "Scenario 1 - code flow RP whose client still allows the implicit flow",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "consentRequired": false,
+      "redirectUris": ["http://127.0.0.1:8101/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "",
+        "post.logout.redirect.uris": "+"
+      }
+    },
+    {
+      "clientId": "s2-confidential",
+      "name": "Scenario 2 - confidential client, code flow, PKCE not enforced",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "s2-confidential-secret-0000",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "consentRequired": false,
+      "redirectUris": ["http://127.0.0.1:8102/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "",
+        "post.logout.redirect.uris": "+"
+      }
+    },
+    {
+      "clientId": "s3-spa",
+      "name": "Scenario 3 - public SPA client, code flow, PKCE S256 enforced",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "consentRequired": false,
+      "redirectUris": ["http://127.0.0.1:8103/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    }
+  ]
+}
