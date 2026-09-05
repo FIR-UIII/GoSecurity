@@ -22,3 +22,10 @@ curl -G \
   --data-urlencode 'email=mallory@example.com' \
   "http://localhost:8080/table/unsafe"
 ```
+
+### Node.js версия
+
+`nodejs/` — аналогичная лаба на Node.js: сырой драйвер `node:sqlite`, query
+builder `knex`, ORM `sequelize`, плюс неочевидные инъекции (second-order,
+инъекция в идентификатор при параметризованном значении, stacked queries через
+`.exec()`, operator injection в Sequelize). См. `nodejs/README.md`.

@@ -1,0 +1,19 @@
+{
+  "name": "node-sqli-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node.js SQL injection training lab: paired /unsafe-* and /safe-* endpoints across raw driver, query builder and ORM",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "//": "Ядро работает на встроенном node:sqlite без зависимостей. Пакеты ниже включают опциональные секции knex/sequelize.",
+  "optionalDependencies": {
+    "knex": "^3.1.0",
+    "sequelize": "^6.37.5",
+    "sqlite3": "^5.1.7"
+  }
+}
