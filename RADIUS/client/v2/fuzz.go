@@ -147,7 +147,7 @@ func buildFuzzedPAPPacket(secret, username, password string, fc fuzzCase) ([]byt
 		attrs = appendAttr(attrs, fc.Attr, fc.Value)
 	}
 
-	return buildRadiusPacket(secret, authenticator, attrs)
+	return buildRadiusPacket(secret, 1, nil, authenticator, attrs, true)
 }
 
 // sendUDPFireAndForget dials addr, writes pkt once, and closes — with no

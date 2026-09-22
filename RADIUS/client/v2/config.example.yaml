@@ -44,3 +44,29 @@ scenarios:
     password: "12345"
     fuzz_file: "client/v2/fuzz.example.txt"
     post_response_datagrams: 2
+
+  # packet: build ONE RADIUS packet entirely from an explicit attribute
+  # list. Nothing is ever added automatically — in particular, NOT a
+  # Message-Authenticator — so this is how you get full manual control
+  # over framing, e.g. to test whether a server actually enforces
+  # Message-Authenticator (this repo's .raddb/clients.conf sets
+  # require_message_authenticator = no, so the answer for that test server
+  # should be "no").
+  #
+  # This example is otherwise a genuinely valid Access-Request for
+  # user "art" / password "12345" (RFC 2865 PAP-encrypted against
+  # secret "MyRadiusSecret123" and the authenticator below) — just with
+  # the Message-Authenticator attribute left out entirely. Since no
+  # type: Message-Authenticator entry is in attrs, none gets appended.
+  - name: "no-message-authenticator"
+    type: packet
+    code: Access-Request
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "art"
+      - type: User-Password
+        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+      # length: N        # any attrs[] entry may also set an explicit
+                          # length: to test a deliberately mismatched
+                          # Length byte (omit for the normal 2+len(value))

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -21,7 +22,7 @@ type Config struct {
 // type.
 type Scenario struct {
 	Name    string `yaml:"name"`
-	Type    string `yaml:"type"` // "raw" | "fuzz" | "otp"
+	Type    string `yaml:"type"` // "raw" | "fuzz" | "otp" | "packet"
 	Addr    string `yaml:"addr"`
 	Secret  string `yaml:"secret"`
 	Timeout string `yaml:"timeout"`
@@ -38,6 +39,24 @@ type Scenario struct {
 	// fuzz
 	FuzzFile              string `yaml:"fuzz_file"`
 	PostResponseDatagrams int    `yaml:"post_response_datagrams"`
+
+	// packet: builds one RADIUS packet entirely from these explicit
+	// fields — nothing is added automatically (in particular, no
+	// Message-Authenticator unless Attrs includes one itself). Use this
+	// for full manual control over framing, e.g. testing how a server
+	// handles a request missing something the normal encoder would
+	// otherwise always include.
+	Code          string     `yaml:"code"`          // RADIUS code, numeric or name (e.g. "Access-Request"); default Access-Request
+	ID            *int       `yaml:"id"`             // Identifier byte (0-255); omitted = random
+	Authenticator string     `yaml:"authenticator"`  // 16-byte Request Authenticator, hex; omitted = random
+	Attrs         []AttrSpec `yaml:"attrs"`
+}
+
+// AttrSpec is one explicit attribute in a "packet" scenario's Attrs list.
+type AttrSpec struct {
+	Type   string `yaml:"type"`   // numeric RADIUS type (0-255) or a known name (see dictionary.go)
+	Length *int   `yaml:"length"` // explicit Length byte override; omitted = 2+len(value) (with the same oversized-value wrap as fuzz mode)
+	Value  string `yaml:"value"`  // literal UTF-8 string, or hex:<hexstring>
 }
 
 // loadConfig reads and parses the YAML file at path.
@@ -98,10 +117,31 @@ func (c *Config) validate() error {
 			if sc.PostResponseDatagrams < 0 {
 				return fmt.Errorf("scenario %s: post_response_datagrams must be >= 0", label)
 			}
+		case "packet":
+			if len(sc.Attrs) == 0 {
+				return fmt.Errorf("scenario %s: type packet requires at least one entry in attrs", label)
+			}
+			if sc.ID != nil && (*sc.ID < 0 || *sc.ID > 255) {
+				return fmt.Errorf("scenario %s: id must be 0-255", label)
+			}
+			if sc.Authenticator != "" {
+				b, err := hex.DecodeString(sc.Authenticator)
+				if err != nil || len(b) != 16 {
+					return fmt.Errorf("scenario %s: authenticator must be exactly 16 bytes of hex", label)
+				}
+			}
+			for i, a := range sc.Attrs {
+				if a.Type == "" {
+					return fmt.Errorf("scenario %s: attrs[%d]: missing type", label, i)
+				}
+				if a.Length != nil && (*a.Length < 0 || *a.Length > 255) {
+					return fmt.Errorf("scenario %s: attrs[%d]: length must be 0-255", label, i)
+				}
+			}
 		case "":
 			return fmt.Errorf("scenario %s: missing type", label)
 		default:
-			return fmt.Errorf("scenario %s: unknown type %q (want raw, fuzz, or otp)", label, sc.Type)
+			return fmt.Errorf("scenario %s: unknown type %q (want raw, fuzz, otp, or packet)", label, sc.Type)
 		}
 	}
 	return nil

@@ -52,7 +52,7 @@ timeout: 5s                   # Go duration string; top-level default (5s if omi
 
 scenarios:
   - name: "otp-happy-path"    # used in logs/summary
-    type: otp                 # raw | fuzz | otp
+    type: otp                 # raw | fuzz | otp | packet
     # addr / secret / timeout may also be set here to override the top level
     ...
 ```
@@ -120,8 +120,35 @@ than erroring or truncating the value — that's itself a valid fuzz case
 (Length lying about actual payload size). A warning is logged whenever this
 happens so it's visible in the run output, but the packet is still sent.
 
-See `client/v2/config.example.yaml` and `client/v2/fuzz.example.txt` for a
-complete working example covering all three scenario types.
+**`type: packet`** — build a single RADIUS packet entirely from an explicit
+attribute list. Nothing is ever added automatically — in particular, **not**
+a Message-Authenticator — giving full manual control over framing:
+```yaml
+    code: Access-Request              # optional; numeric or name, default Access-Request
+    id: 5                             # optional; 0-255, default random
+    authenticator: "000102030405060708090a0b0c0d0e0f"   # optional; 16 bytes hex, default random
+    attrs:
+      - type: User-Name                # numeric (0-255) or known name, see dictionary.go
+        value: "art"                   # literal UTF-8 string, or hex:<hexstring>
+        # length: 5                    # optional: override the encoded Length byte
+      - type: User-Password
+        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+```
+This is the tool to reach for when you want to test something the normal
+encoder always includes but you want to leave out — most notably, sending a
+request **without a Message-Authenticator attribute at all**: just don't put
+a `type: Message-Authenticator` (or `80`) entry in `attrs`. Because nothing
+is auto-added, this also means: if you want a *valid* Message-Authenticator
+or PAP-encrypted password in the packet, you have to compute and supply it
+yourself (via `hex:`) — `otp`/`fuzz` scenarios already do that automatically
+if that's what you're after instead. Any `attrs[]` entry can also set an
+explicit `length:` to send a deliberately mismatched Length byte, same idea
+as the `fuzz` mode's oversized-value wraparound.
+
+See `client/v2/config.example.yaml` (including a ready-to-run
+"no-message-authenticator" `packet` example with a real, correctly
+PAP-encrypted password) and `client/v2/fuzz.example.txt` for complete
+working examples covering all four scenario types.
 
 ## Test server
 

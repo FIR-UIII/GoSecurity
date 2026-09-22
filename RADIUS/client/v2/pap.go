@@ -32,24 +32,34 @@ func exchange(addr, secret string, req, reqAuth []byte, timeout time.Duration) (
 	return resp, attrs, nil
 }
 
-// buildRadiusPacket assembles a full Access-Request from an already-built
-// attrs TLV byte stream: it picks a random 1-byte Identifier, computes the
-// Length field (20-byte header + len(attrs)), copies the header and attrs
-// into the final buffer, and appends the Message-Authenticator. It's shared
-// by buildPAPPacket and the fuzz packet builder (fuzz.go) so this
-// security-sensitive framing math has a single implementation.
-func buildRadiusPacket(secret string, authenticator []byte, attrs []byte) ([]byte, []byte, error) {
+// buildRadiusPacket assembles a full RADIUS packet from an already-built
+// attrs TLV byte stream: header Code is code; Identifier is *id if id is
+// non-nil, otherwise a random byte; Length is computed (20-byte header +
+// len(attrs)). If addMessageAuth is true, a Message-Authenticator attribute
+// is appended (as buildPAPPacket always wants); if false, the packet is
+// left exactly as attrs specifies — no attribute is added automatically,
+// which is what a caller wanting full manual control over framing (e.g.
+// testing a request with no Message-Authenticator at all) needs.
+//
+// This is shared by buildPAPPacket, the fuzz packet builder (fuzz.go), and
+// the manual packet-scenario builder (packet.go) so this security-sensitive
+// framing math has a single implementation.
+func buildRadiusPacket(secret string, code byte, id *byte, authenticator []byte, attrs []byte, addMessageAuth bool) ([]byte, []byte, error) {
 	// Считаем полную длину кадра (20 байт заголовка + длина атрибутов)
 	totalLen := 20 + len(attrs)
 
 	// Собираем итоговый пакет
 	pkt := make([]byte, totalLen)
-	pkt[0] = 1 // Code: Access-Request
+	pkt[0] = code
 
-	// Случайный Identifier пакета (1 байт)
-	idByte := make([]byte, 1)
-	rand.Read(idByte)
-	pkt[1] = idByte[0]
+	// Identifier пакета (1 байт): явно заданный, либо случайный
+	if id != nil {
+		pkt[1] = *id
+	} else {
+		idByte := make([]byte, 1)
+		rand.Read(idByte)
+		pkt[1] = idByte[0]
+	}
 
 	// Length (2 байта, BigEndian)
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
@@ -59,6 +69,10 @@ func buildRadiusPacket(secret string, authenticator []byte, attrs []byte) ([]byt
 
 	// Attributes
 	copy(pkt[20:], attrs)
+
+	if !addMessageAuth {
+		return pkt, authenticator, nil
+	}
 
 	finalPkt := addMessageAuthenticator(pkt, secret)
 
@@ -94,7 +108,7 @@ func buildPAPPacket(secret, username, password string, state []byte) ([]byte, []
 		attrs = append(attrs, state...)
 	}
 
-	return buildRadiusPacket(secret, authenticator, attrs)
+	return buildRadiusPacket(secret, 1, nil, authenticator, attrs, true)
 }
 
 func runPAP(addr, secret, username, password string, timeout time.Duration) error {
