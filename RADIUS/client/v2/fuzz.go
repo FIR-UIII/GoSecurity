@@ -171,14 +171,28 @@ func sendUDPFireAndForget(addr string, pkt []byte) error {
 // tool bug), then fires postResponseDatagrams fire-and-forget copies of
 // that same datagram before moving to the next case. Ends with a one-line
 // summary.
-func runFuzzScenario(addr, secret string, timeout time.Duration, username, password, fuzzFile string, postResponseDatagrams int) error {
+//
+// If expectedResponse is non-empty, EVERY case's response Code is checked
+// against it (see checkExpectedResponse in packet.go) — e.g. asserting
+// that a server rejects every malformed case in the wordlist. Any mismatch
+// is logged as a per-case failure, and if one or more cases mismatched,
+// runFuzzScenario returns an error so the whole scenario is reported as
+// failed. expectedResponse == "" keeps the legacy behavior of just flagging
+// response codes outside {Access-Accept, Access-Reject, Access-Challenge}
+// as merely "unexpected" (logged, not a failure).
+func runFuzzScenario(addr, secret string, timeout time.Duration, username, password, fuzzFile, expectedResponse string, postResponseDatagrams int) error {
 	cases, err := loadFuzzFile(fuzzFile)
 	if err != nil {
 		return err
 	}
 	log.Printf("[fuzz] loaded %d case(s) from %s", len(cases), fuzzFile)
 
-	var errCount, unexpectedCount int
+	wantCode, err := resolveExpectedResponse(expectedResponse)
+	if err != nil {
+		return err
+	}
+
+	var errCount, unexpectedCount, mismatchCount int
 	for _, fc := range cases {
 		pkt, _, err := buildFuzzedPAPPacket(secret, username, password, fc)
 		if err != nil {
@@ -194,9 +208,16 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, username, passw
 			log.Printf("[fuzz #%d] case=%q -> ERROR: %v", fc.Line, fc.Raw, err)
 		} else {
 			log.Printf("[fuzz #%d] case=%q response %d bytes: %x", fc.Line, fc.Raw, len(resp), resp)
-			if len(resp) > 0 && resp[0] != 2 && resp[0] != 3 && resp[0] != 11 {
-				unexpectedCount++
-				log.Printf("[fuzz #%d] case=%q unexpected response code %d", fc.Line, fc.Raw, resp[0])
+			if len(resp) > 0 {
+				switch {
+				case wantCode != nil && resp[0] != *wantCode:
+					mismatchCount++
+					log.Printf("[fuzz #%d] case=%q FAIL: expected response %s (code %d, %s), got code %d (%s)",
+						fc.Line, fc.Raw, expectedResponse, *wantCode, radiusCodeName(*wantCode), resp[0], radiusCodeName(resp[0]))
+				case wantCode == nil && resp[0] != 2 && resp[0] != 3 && resp[0] != 11:
+					unexpectedCount++
+					log.Printf("[fuzz #%d] case=%q unexpected response code %d", fc.Line, fc.Raw, resp[0])
+				}
 			}
 		}
 
@@ -210,7 +231,11 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, username, passw
 		}
 	}
 
-	log.Printf("[fuzz] done: %d case(s), %d error(s)/timeout(s), %d unexpected response code(s)",
-		len(cases), errCount, unexpectedCount)
+	log.Printf("[fuzz] done: %d case(s), %d error(s)/timeout(s), %d unexpected response code(s), %d expected-response mismatch(es)",
+		len(cases), errCount, unexpectedCount, mismatchCount)
+
+	if wantCode != nil && mismatchCount > 0 {
+		return fmt.Errorf("%d of %d case(s) did not return the expected response %s", mismatchCount, len(cases), expectedResponse)
+	}
 	return nil
 }

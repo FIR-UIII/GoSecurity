@@ -43,6 +43,26 @@ An explicit `-addr` flag on the command line overrides the config file's
 top-level `addr` for every scenario; if `-addr` is left at its default, the
 config's `addr` (or a scenario's own `addr` override) is used instead.
 
+### Pass/fail with `response:`
+
+Any `otp`, `raw`, `fuzz`, or `packet` scenario may set a `response:` field —
+the RADIUS response code the scenario must get back to count as a pass:
+```yaml
+    response: Accept       # short aliases: Accept | Reject | Challenge
+    # response: Access-Accept   # or a full RADIUS code name
+    # response: 2               # or a numeric code
+```
+Left unset, a scenario is unchanged from before: it passes as long as it ran
+without a network/protocol error, regardless of which code came back. Set
+`response:` and a mismatch makes the scenario FAILED in the log and the
+end-of-run summary (and the process exit non-zero), even though the request
+was sent and a reply was received without error — e.g. `response: Reject` on
+a `raw` scenario asserts the server must reject that packet, and turns an
+unexpected Accept into a reported test failure instead of just a log line.
+For `fuzz`, `response:` applies to **every** case in the wordlist, not just
+one — useful for asserting a server rejects an entire batch of malformed
+requests.
+
 ### Config schema
 
 ```yaml
@@ -54,6 +74,7 @@ scenarios:
   - name: "otp-happy-path"    # used in logs/summary
     type: otp                 # raw | fuzz | otp | packet
     # addr / secret / timeout may also be set here to override the top level
+    # response: Accept        # optional pass/fail assertion, see below
     ...
 ```
 

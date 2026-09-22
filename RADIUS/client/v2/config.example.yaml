@@ -19,6 +19,9 @@ scenarios:
     password: "12345"
     otp: "999999"
     # otp_env: "RADIUS_TEST_OTP"   # alternative to a literal otp: value
+    response: Accept   # expected outcome to pass; also: Reject, Challenge,
+                        # a full name ("Access-Accept"), or a numeric code.
+                        # Omit response entirely to make no assertion.
 
   # raw: send a complete, hand-specified raw UDP datagram, entirely outside
   # the normal packet encoder — for malformed/malicious packet testing
@@ -33,6 +36,9 @@ scenarios:
   - name: "raw-example"
     type: raw
     packet_hex: "01050014000102030405060708090a0b0c0d0e0f"
+    response: Reject   # a request with no attributes at all should be
+                        # rejected; if the server instead accepts it, this
+                        # scenario is reported FAILED
 
   # fuzz: send one request per line of fuzz_file (format: "attr:value",
   # see fuzz.example.txt), built from valid seed credentials (username /
@@ -44,6 +50,11 @@ scenarios:
     password: "12345"
     fuzz_file: "client/v2/fuzz.example.txt"
     post_response_datagrams: 2
+    # response: Reject  # if set, EVERY case in fuzz_file must get this
+                         # response back to pass — e.g. asserting the
+                         # server rejects all of these malformed requests.
+                         # Left commented out here since fuzz.example.txt's
+                         # cases aren't all expected to behave identically.
 
   # packet: build ONE RADIUS packet entirely from an explicit attribute
   # list. Nothing is ever added automatically — in particular, NOT a
@@ -70,3 +81,7 @@ scenarios:
       # length: N        # any attrs[] entry may also set an explicit
                           # length: to test a deliberately mismatched
                           # Length byte (omit for the normal 2+len(value))
+    response: Accept   # this repo's .raddb/clients.conf sets
+                        # require_message_authenticator = no, so a valid
+                        # request missing it should still be accepted;
+                        # change to Reject to assert the opposite policy

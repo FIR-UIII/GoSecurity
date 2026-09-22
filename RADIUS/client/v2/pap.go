@@ -139,8 +139,11 @@ func runPAP(addr, secret, username, password string, timeout time.Duration) erro
 // runPAPWithOTP performs a two-round PAP+OTP exchange: round 1 sends the
 // primary credentials, and if the server responds with Access-Challenge,
 // round 2 sends otpCode as the password, echoing back the State attribute
-// from round 1.
-func runPAPWithOTP(addr, secret, username, password, otpCode string, timeout time.Duration) error {
+// from round 1. If expectedResponse is non-empty, the final round's
+// response code is checked against it (see checkExpectedResponse in
+// packet.go); expectedResponse == "" makes no assertion (legacy
+// behavior).
+func runPAPWithOTP(addr, secret, username, password, otpCode, expectedResponse string, timeout time.Duration) error {
 	// Round 1: primary credentials.
 	req1, req1Auth, err := buildPAPPacket(secret, username, password, nil)
 	if err != nil {
@@ -156,10 +159,10 @@ func runPAPWithOTP(addr, secret, username, password, otpCode string, timeout tim
 	switch resp1[0] {
 	case 2:
 		fmt.Println("Result: Access-Accept (Authentication successful)")
-		return nil
+		return checkExpectedResponse(expectedResponse, resp1[0])
 	case 3:
 		fmt.Println("Result: Access-Reject (Invalid credentials)")
-		return nil
+		return checkExpectedResponse(expectedResponse, resp1[0])
 	case 11:
 		// fall through to round 2
 	default:
@@ -196,5 +199,5 @@ func runPAPWithOTP(addr, secret, username, password, otpCode string, timeout tim
 	default:
 		fmt.Printf("Result: unexpected code %d\n", resp2[0])
 	}
-	return nil
+	return checkExpectedResponse(expectedResponse, resp2[0])
 }

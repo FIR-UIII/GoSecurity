@@ -27,6 +27,15 @@ type Scenario struct {
 	Secret  string `yaml:"secret"`
 	Timeout string `yaml:"timeout"`
 
+	// Response, if set, is the RADIUS response code this scenario must get
+	// back to count as a pass (numeric, a full name like "Access-Accept",
+	// or a short alias: "Accept" | "Reject" | "Challenge"). Applies to
+	// otp, raw, fuzz, and packet. Left empty, no assertion is made and the
+	// scenario passes as long as it ran without a network/protocol error
+	// (today's default behavior). For "fuzz", every case in the wordlist
+	// is checked against it, not just the last one.
+	Response string `yaml:"response"`
+
 	// otp
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
@@ -90,6 +99,12 @@ func (c *Config) validate() error {
 				return fmt.Errorf("scenario %s: duplicate name", label)
 			}
 			seen[sc.Name] = true
+		}
+
+		if sc.Response != "" {
+			if _, err := resolveExpectedResponse(sc.Response); err != nil {
+				return fmt.Errorf("scenario %s: response: %w", label, err)
+			}
 		}
 
 		switch sc.Type {

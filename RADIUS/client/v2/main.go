@@ -49,7 +49,7 @@ func main() {
 			log.Fatalf("PAP exchange failed: %v", err)
 		}
 	case "pap+otp":
-		err := runPAPWithOTP(*addr, *secret, *username, *password, "999999", 5*time.Second)
+		err := runPAPWithOTP(*addr, *secret, *username, *password, "999999", "", 5*time.Second)
 		if err != nil {
 			log.Fatalf("PAP+OTP exchange failed: %v", err)
 		}

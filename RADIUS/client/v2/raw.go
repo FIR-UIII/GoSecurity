@@ -18,8 +18,9 @@ import (
 // response-authenticator/Message-Authenticator checks: those checks are
 // expected to legitimately fail against a hand-crafted request, and that
 // failure is itself a valid, interesting result for this scenario type, not
-// an error to abort on.
-func runRawScenario(addr string, timeout time.Duration, packetHex string) error {
+// an error to abort on. If expectedResponse is non-empty, the response's
+// Code byte is checked against it (see checkExpectedResponse in packet.go).
+func runRawScenario(addr string, timeout time.Duration, packetHex, expectedResponse string) error {
 	clean := strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
 			return -1
@@ -39,11 +40,17 @@ func runRawScenario(addr string, timeout time.Duration, packetHex string) error 
 	}
 	log.Printf("[raw] response %d bytes: %x", len(resp), resp)
 
-	attrs, perr := parseAttributes(resp)
-	if perr != nil {
+	if attrs, perr := parseAttributes(resp); perr != nil {
 		log.Printf("[raw] response did not parse as well-formed RADIUS attributes: %v", perr)
+	} else {
+		log.Printf("[raw] parsed response attributes: %v", attrs)
+	}
+
+	if len(resp) == 0 {
+		if expectedResponse != "" {
+			return fmt.Errorf("empty response, cannot check expected response %s", expectedResponse)
+		}
 		return nil
 	}
-	log.Printf("[raw] parsed response attributes: %v", attrs)
-	return nil
+	return checkExpectedResponse(expectedResponse, resp[0])
 }
