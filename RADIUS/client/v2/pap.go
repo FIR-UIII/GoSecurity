@@ -32,6 +32,39 @@ func exchange(addr, secret string, req, reqAuth []byte, timeout time.Duration) (
 	return resp, attrs, nil
 }
 
+// buildRadiusPacket assembles a full Access-Request from an already-built
+// attrs TLV byte stream: it picks a random 1-byte Identifier, computes the
+// Length field (20-byte header + len(attrs)), copies the header and attrs
+// into the final buffer, and appends the Message-Authenticator. It's shared
+// by buildPAPPacket and the fuzz packet builder (fuzz.go) so this
+// security-sensitive framing math has a single implementation.
+func buildRadiusPacket(secret string, authenticator []byte, attrs []byte) ([]byte, []byte, error) {
+	// Считаем полную длину кадра (20 байт заголовка + длина атрибутов)
+	totalLen := 20 + len(attrs)
+
+	// Собираем итоговый пакет
+	pkt := make([]byte, totalLen)
+	pkt[0] = 1 // Code: Access-Request
+
+	// Случайный Identifier пакета (1 байт)
+	idByte := make([]byte, 1)
+	rand.Read(idByte)
+	pkt[1] = idByte[0]
+
+	// Length (2 байта, BigEndian)
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
+
+	// Authenticator (16 байт)
+	copy(pkt[4:20], authenticator)
+
+	// Attributes
+	copy(pkt[20:], attrs)
+
+	finalPkt := addMessageAuthenticator(pkt, secret)
+
+	return finalPkt, authenticator, nil
+}
+
 func buildPAPPacket(secret, username, password string, state []byte) ([]byte, []byte, error) {
 	// 1. Генерируем 16 случайных байт Request Authenticator
 	authenticator := make([]byte, 16)
@@ -61,30 +94,7 @@ func buildPAPPacket(secret, username, password string, state []byte) ([]byte, []
 		attrs = append(attrs, state...)
 	}
 
-	// 4. Считаем полную длину кадра (20 байт заголовка + длина атрибутов)
-	totalLen := 20 + len(attrs)
-
-	// 5. Собираем итоговый пакет
-	pkt := make([]byte, totalLen)
-	pkt[0] = 1 // Code: Access-Request
-
-	// Случайный Identifier пакета (1 байт)
-	idByte := make([]byte, 1)
-	rand.Read(idByte)
-	pkt[1] = idByte[0]
-
-	// Length (2 байта, BigEndian)
-	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
-
-	// Authenticator (16 байт)
-	copy(pkt[4:20], authenticator)
-
-	// Attributes
-	copy(pkt[20:], attrs)
-
-	finalPkt := addMessageAuthenticator(pkt, secret)
-
-	return finalPkt, authenticator, nil
+	return buildRadiusPacket(secret, authenticator, attrs)
 }
 
 func runPAP(addr, secret, username, password string, timeout time.Duration) error {
@@ -112,7 +122,11 @@ func runPAP(addr, secret, username, password string, timeout time.Duration) erro
 	return nil
 }
 
-func runPAPWithOTP(addr, secret, username, password string, timeout time.Duration) error {
+// runPAPWithOTP performs a two-round PAP+OTP exchange: round 1 sends the
+// primary credentials, and if the server responds with Access-Challenge,
+// round 2 sends otpCode as the password, echoing back the State attribute
+// from round 1.
+func runPAPWithOTP(addr, secret, username, password, otpCode string, timeout time.Duration) error {
 	// Round 1: primary credentials.
 	req1, req1Auth, err := buildPAPPacket(secret, username, password, nil)
 	if err != nil {
@@ -149,8 +163,6 @@ func runPAPWithOTP(addr, secret, username, password string, timeout time.Duratio
 	}
 
 	// Round 2: OTP.
-	// TODO: read otpCode from stdin instead of hardcoding.
-	otpCode := "999999"
 	req2, req2Auth, err := buildPAPPacket(secret, username, otpCode, state)
 	if err != nil {
 		return fmt.Errorf("build OTP packet: %w", err)

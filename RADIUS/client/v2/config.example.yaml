@@ -1,0 +1,46 @@
+# Example scenario config for: go run ./client/v2 -c client/v2/config.example.yaml
+#
+# Top-level addr/secret/timeout are defaults; any scenario may override them
+# individually (leave a field empty/absent to inherit the default). An
+# explicit -addr flag on the command line overrides the top-level addr here.
+
+addr: "localhost:1812"
+secret: "MyRadiusSecret123"
+timeout: 5s
+
+scenarios:
+  # otp: two-round PAP+OTP chain. Round 1 sends username/password; if the
+  # server answers Access-Challenge, round 2 sends `otp` (or the value of
+  # the env var named by `otp_env`) as the password, echoing back State.
+  # Exactly one of otp / otp_env must be set.
+  - name: "otp-happy-path"
+    type: otp
+    username: "art"
+    password: "12345"
+    otp: "999999"
+    # otp_env: "RADIUS_TEST_OTP"   # alternative to a literal otp: value
+
+  # raw: send a complete, hand-specified raw UDP datagram, entirely outside
+  # the normal packet encoder — for malformed/malicious packet testing
+  # (bad lengths, bad codes, garbage attributes, etc.). packet_hex is the
+  # full packet (header + attributes) as a hex string; whitespace/newlines
+  # are stripped, so a YAML block scalar can be used for long packets.
+  # This example is a minimal, well-formed Access-Request with NO
+  # attributes at all (Code=1, ID=5, Length=20, 16-byte authenticator) —
+  # most RADIUS servers will reject it (no User-Name), which is exactly the
+  # kind of edge case this mode exists to probe. Replace packet_hex with
+  # your own hand-crafted bytes for real testing.
+  - name: "raw-example"
+    type: raw
+    packet_hex: "01050014000102030405060708090a0b0c0d0e0f"
+
+  # fuzz: send one request per line of fuzz_file (format: "attr:value",
+  # see fuzz.example.txt), built from valid seed credentials (username /
+  # password below), then fire post_response_datagrams extra fire-and-forget
+  # copies of that same datagram after each response.
+  - name: "fuzz-password-field"
+    type: fuzz
+    username: "art"
+    password: "12345"
+    fuzz_file: "client/v2/fuzz.example.txt"
+    post_response_datagrams: 2
