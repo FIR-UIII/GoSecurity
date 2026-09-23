@@ -85,3 +85,23 @@ scenarios:
                         # require_message_authenticator = no, so a valid
                         # request missing it should still be accepted;
                         # change to Reject to assert the opposite policy
+
+  # packet + auto Message-Authenticator: a type: Message-Authenticator
+  # entry with no value/length is computed for you (RFC 2869 HMAC-MD5 over
+  # the whole packet), the same way otp/fuzz scenarios already do it — you
+  # don't have to precompute and paste in a hex: value by hand. This also
+  # shows NAS-IP-Address taking a normal dotted-quad string: it's
+  # auto-encoded as the required 4 raw octets, not sent as 9 bytes of
+  # ASCII text.
+  - name: "status-with-message-authenticator"
+    type: packet
+    code: Status-Server
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: NAS-IP-Address
+        value: 127.0.0.1
+      - type: Message-Authenticator
+    response: Accept   # this repo's .raddb/clients.conf sets
+                        # require_message_authenticator = no, so a valid,
+                        # correctly authenticated Status-Server request
+                        # should be accepted

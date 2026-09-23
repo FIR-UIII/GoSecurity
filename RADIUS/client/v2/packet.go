@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -104,36 +107,101 @@ func checkExpectedResponse(expected string, got byte) error {
 	return nil
 }
 
+// ipv4Attrs are the well-known RADIUS attributes whose Value MUST be the
+// raw 4-octet binary form of an IPv4 address (RFC 2865 §5.4, §5.8, §5.9,
+// §5.14), not its dotted-quad text representation. See maybeEncodeIPv4.
+var ipv4Attrs = map[byte]bool{
+	4:  true, // NAS-IP-Address
+	8:  true, // Framed-IP-Address
+	9:  true, // Framed-IP-Netmask
+	14: true, // Login-IP-Host
+}
+
+// maybeEncodeIPv4 converts raw (spec.Value as written in YAML) to its
+// 4-octet binary form when typ is one of ipv4Attrs and raw parses as a
+// dotted-quad IPv4 address — e.g. "127.0.0.1" becomes the 4 bytes
+// 0x7f000001, matching what RFC 2865 requires on the wire and what a
+// strict RADIUS server/parser expects. Without this, a literal
+// "value: 127.0.0.1" would be sent as its 9-byte ASCII text instead,
+// which is malformed for these attributes.
+//
+// A hex:... value is left untouched (val is already the exact raw bytes
+// the author chose), and a raw string that doesn't parse as IPv4 is left
+// as val too, so a deliberately malformed IP value is still testable —
+// this only fixes the common case of writing a normal address in the
+// obvious way.
+func maybeEncodeIPv4(typ byte, raw string, val []byte) []byte {
+	if !ipv4Attrs[typ] || strings.HasPrefix(raw, "hex:") {
+		return val
+	}
+	if ip4 := net.ParseIP(raw).To4(); ip4 != nil {
+		return ip4
+	}
+	return val
+}
+
 // appendAttrSpec resolves spec's Type/Value and appends the resulting TLV
-// to attrs. If spec.Length is set, it's used as the literal Length byte
-// even if it doesn't match len(value) — deliberately allowing malformed
-// lengths, since that's a legitimate thing to want full manual control
-// over here. Otherwise it falls back to appendAttr's default 2+len(value)
-// encoding (including its oversized-value wrap warning).
-func appendAttrSpec(attrs []byte, spec AttrSpec) ([]byte, error) {
+// to attrs, returning the offset (within the returned attrs, i.e. relative
+// to the start of the attribute stream) of a 16-byte all-zero
+// Message-Authenticator placeholder if this call added one, or -1
+// otherwise; see the special case below and runPacketScenario, which
+// patches the real hash in once the whole packet is assembled.
+//
+// If spec.Length is set, it's used as the literal Length byte even if it
+// doesn't match len(value) — deliberately allowing malformed lengths,
+// since that's a legitimate thing to want full manual control over here.
+// Otherwise it falls back to appendAttr's default 2+len(value) encoding
+// (including its oversized-value wrap warning).
+func appendAttrSpec(attrs []byte, spec AttrSpec) ([]byte, int, error) {
 	typ, err := resolveAttrType(spec.Type)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
+
+	// Message-Authenticator (type 80) with no explicit value or length:
+	// treat this as "compute it for me". Its correct value (RFC 2869
+	// §5.14: HMAC-MD5 over the entire packet, with this field zeroed) can
+	// only be known once the whole packet — including this very
+	// attribute's own Length byte — has been assembled, so reserve 18
+	// bytes (Type|Length|16 zero bytes) here and report their offset;
+	// runPacketScenario computes the real hash afterward and patches it
+	// in in place. Supplying an explicit value: or length: opts back out
+	// of this and falls through to full manual control, same as any
+	// other attribute.
+	if typ == 80 && spec.Value == "" && spec.Length == nil {
+		valOffset := len(attrs) + 2
+		attrs = append(attrs, typ, 18)
+		attrs = append(attrs, make([]byte, 16)...)
+		return attrs, valOffset, nil
+	}
+
 	val, err := parseFuzzValue(spec.Value)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
+	val = maybeEncodeIPv4(typ, spec.Value, val)
+
 	if spec.Length != nil {
 		attrs = append(attrs, typ, byte(*spec.Length))
 		attrs = append(attrs, val...)
-		return attrs, nil
+		return attrs, -1, nil
 	}
-	return appendAttr(attrs, typ, val), nil
+	return appendAttr(attrs, typ, val), -1, nil
 }
 
 // runPacketScenario builds a single RADIUS packet entirely from sc's
 // explicit code/id/authenticator/attrs fields. Nothing is ever added
-// automatically — in particular, NOT a Message-Authenticator — giving full
-// manual control over framing. This is the scenario type to reach for when
+// automatically that isn't explicitly listed in attrs — giving full manual
+// control over framing. This is the scenario type to reach for when
 // testing how a server handles a request missing something the normal
 // encoder would always include, e.g. Message-Authenticator: just leave any
-// type-80 entry out of attrs.
+// type-80 entry out of attrs entirely.
+//
+// A type-80 (Message-Authenticator) entry that gives neither value nor
+// length IS computed automatically (see appendAttrSpec), the same as
+// otp/raw/fuzz scenarios already do — full manual control is still
+// available by supplying an explicit value: (e.g. hex:...) or length:,
+// which is treated as deliberate and left completely untouched.
 func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) error {
 	code, err := resolveRadiusCode(sc.Code)
 	if err != nil {
@@ -160,16 +228,37 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 	}
 
 	var attrs []byte
+	maValOffset := -1 // offset within attrs of an auto Message-Authenticator's 16 zero bytes, or -1
 	for i, spec := range sc.Attrs {
-		attrs, err = appendAttrSpec(attrs, spec)
+		var off int
+		attrs, off, err = appendAttrSpec(attrs, spec)
 		if err != nil {
 			return fmt.Errorf("attrs[%d]: %w", i, err)
+		}
+		if off >= 0 {
+			if maValOffset >= 0 {
+				return fmt.Errorf("attrs[%d]: only one auto-computed Message-Authenticator is supported per packet", i)
+			}
+			maValOffset = off
 		}
 	}
 
 	pkt, _, err := buildRadiusPacket(secret, code, id, authenticator, attrs, false)
 	if err != nil {
 		return fmt.Errorf("build packet: %w", err)
+	}
+
+	// Patch in the real Message-Authenticator now that the full packet
+	// (correct Length, all other attributes) is assembled — RFC 2869
+	// §5.14 requires the HMAC-MD5 to be computed over the entire packet
+	// with this field's 16 bytes zeroed, which is exactly the state pkt
+	// is in right now (appendAttrSpec left the placeholder zeroed).
+	if maValOffset >= 0 {
+		absOffset := 20 + maValOffset
+		mac := hmac.New(md5.New, []byte(secret))
+		mac.Write(pkt)
+		hash := mac.Sum(nil)
+		copy(pkt[absOffset:absOffset+16], hash)
 	}
 	log.Printf("[packet] sending %d bytes: %x", len(pkt), pkt)
 

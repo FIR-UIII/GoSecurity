@@ -50,11 +50,16 @@ type Scenario struct {
 	PostResponseDatagrams int    `yaml:"post_response_datagrams"`
 
 	// packet: builds one RADIUS packet entirely from these explicit
-	// fields — nothing is added automatically (in particular, no
-	// Message-Authenticator unless Attrs includes one itself). Use this
-	// for full manual control over framing, e.g. testing how a server
-	// handles a request missing something the normal encoder would
-	// otherwise always include.
+	// fields — nothing is added automatically beyond what Attrs lists.
+	// Use this for full manual control over framing, e.g. testing how a
+	// server handles a request missing something the normal encoder would
+	// otherwise always include. A Message-Authenticator entry in Attrs
+	// that gives neither value nor length is computed automatically
+	// (RFC 2869 HMAC-MD5 over the whole packet); give it an explicit
+	// value/length for full manual control instead. Well-known IPv4
+	// attributes (NAS-IP-Address, Framed-IP-Address, Framed-IP-Netmask,
+	// Login-IP-Host) similarly auto-encode a dotted-quad value string as
+	// its 4 raw octets rather than literal ASCII text.
 	Code          string     `yaml:"code"`          // RADIUS code, numeric or name (e.g. "Access-Request"); default Access-Request
 	ID            *int       `yaml:"id"`             // Identifier byte (0-255); omitted = random
 	Authenticator string     `yaml:"authenticator"`  // 16-byte Request Authenticator, hex; omitted = random
