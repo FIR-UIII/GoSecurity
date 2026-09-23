@@ -86,17 +86,25 @@ scenarios:
                         # request missing it should still be accepted;
                         # change to Reject to assert the opposite policy
 
-  # packet + auto Message-Authenticator: a type: Message-Authenticator
-  # entry with no value/length is computed for you (RFC 2869 HMAC-MD5 over
-  # the whole packet), the same way otp/fuzz scenarios already do it — you
-  # don't have to precompute and paste in a hex: value by hand. This also
-  # shows NAS-IP-Address taking a normal dotted-quad string: it's
-  # auto-encoded as the required 4 raw octets, not sent as 9 bytes of
-  # ASCII text.
+  # packet + auto Message-Authenticator + auto Request Authenticator: a
+  # type: Message-Authenticator entry with no value/length is computed for
+  # you (RFC 2869 HMAC-MD5 over the whole packet), the same way otp/fuzz
+  # scenarios already do it — you don't have to precompute and paste in a
+  # hex: value by hand. This also shows NAS-IP-Address taking a normal
+  # dotted-quad string: it's auto-encoded as the required 4 raw octets,
+  # not sent as 9 bytes of ASCII text.
+  #
+  # Note there's no `authenticator:` field here at all: Status-Server (like
+  # Accounting-Request) has no User-Password to justify a random Request
+  # Authenticator, so RFC 5997 §3 requires it to instead be computed as
+  # MD5(header + attributes + secret) — an integrity check, not random
+  # data. Leaving `authenticator:` unset for one of these two codes makes
+  # the tool compute it that way automatically. This repo's own FreeRADIUS
+  # test config happens not to enforce that, but plenty of real servers do
+  # and will otherwise reject the packet as having a "bad authenticator".
   - name: "status-with-message-authenticator"
     type: packet
     code: Status-Server
-    authenticator: "000102030405060708090a0b0c0d0e0f"
     attrs:
       - type: NAS-IP-Address
         value: 127.0.0.1

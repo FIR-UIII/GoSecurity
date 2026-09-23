@@ -181,10 +181,23 @@ raw 4-octet IPv4 address — `NAS-IP-Address`, `Framed-IP-Address`,
 Use `hex:` instead if you need to send something that isn't a well-formed
 IPv4 address for one of these (e.g. to test how a server handles that).
 
+For `code: Accounting-Request` or `code: Status-Server`, leaving
+`authenticator:` unset does **not** generate a random one like every other
+code does. Neither of those codes carries a `User-Password` to justify a
+random value, so RFC 5997 §3 (Status-Server) and RFC 2866 §3
+(Accounting-Request) instead define the Request Authenticator as an
+integrity check — `MD5(header + attributes + secret)`, computed with the
+Authenticator field itself zeroed — and that's what gets computed and
+filled in automatically. Some servers reject a random authenticator here
+with something like "bad authenticator or shared secret"; give an explicit
+`authenticator:` hex value to opt back out and send an arbitrary one on
+purpose instead.
+
 See `client/v2/config.example.yaml` (including a ready-to-run
 "no-message-authenticator" `packet` example with a real, correctly
 PAP-encrypted password, and a "status-with-message-authenticator" example
-covering the auto-computed Message-Authenticator + NAS-IP-Address case)
+covering the auto-computed Message-Authenticator, auto-computed
+accounting-style Request Authenticator, and NAS-IP-Address case)
 and `client/v2/fuzz.example.txt` for complete
 working examples covering all four scenario types.
 

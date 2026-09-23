@@ -59,7 +59,12 @@ type Scenario struct {
 	// value/length for full manual control instead. Well-known IPv4
 	// attributes (NAS-IP-Address, Framed-IP-Address, Framed-IP-Netmask,
 	// Login-IP-Host) similarly auto-encode a dotted-quad value string as
-	// its 4 raw octets rather than literal ASCII text.
+	// its 4 raw octets rather than literal ASCII text. If Authenticator
+	// is left empty and Code is Accounting-Request or Status-Server, the
+	// Request Authenticator is also computed automatically per RFC 5997
+	// §3 / RFC 2866 §3 (MD5 of the header+attributes+secret) instead of
+	// being random — required by some servers (though this repo's own
+	// FreeRADIUS test config happens not to enforce it).
 	Code          string     `yaml:"code"`          // RADIUS code, numeric or name (e.g. "Access-Request"); default Access-Request
 	ID            *int       `yaml:"id"`             // Identifier byte (0-255); omitted = random
 	Authenticator string     `yaml:"authenticator"`  // 16-byte Request Authenticator, hex; omitted = random

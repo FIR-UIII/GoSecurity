@@ -214,12 +214,29 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 		id = &b
 	}
 
+	// Accounting-Request and Status-Server have no User-Password to drive
+	// the choice of Request Authenticator, so RFC 5997 §3 requires
+	// Status-Server (like RFC 2866 §3 for Accounting-Request) to use it as
+	// an integrity check instead: MD5(header-with-zeroed-authenticator +
+	// attributes + secret), NOT an arbitrary/random value. A random
+	// authenticator here — which is what every other code uses — makes a
+	// strict server (this repo's own FreeRADIUS test config happens not
+	// to enforce it, but others, e.g. tinyradius, do) reject the packet
+	// with something like "bad authenticator or shared secret". It's
+	// computed below, once the rest of the packet (in particular any
+	// Message-Authenticator placeholder) is known; skipped entirely if an
+	// explicit authenticator: was given, since that's a deliberate
+	// full-manual-control override (e.g. to test a wrong one on purpose).
+	needsAccountingStyleAuth := sc.Authenticator == "" && (code == 4 || code == 12)
+
 	var authenticator []byte
 	if sc.Authenticator != "" {
 		authenticator, err = hex.DecodeString(sc.Authenticator)
 		if err != nil {
 			return fmt.Errorf("decode authenticator: %w", err)
 		}
+	} else if needsAccountingStyleAuth {
+		authenticator = make([]byte, 16) // placeholder; computed for real below
 	} else {
 		authenticator = make([]byte, 16)
 		if _, err := rand.Read(authenticator); err != nil {
@@ -246,6 +263,17 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 	pkt, _, err := buildRadiusPacket(secret, code, id, authenticator, attrs, false)
 	if err != nil {
 		return fmt.Errorf("build packet: %w", err)
+	}
+
+	// Compute the real Request Authenticator now that pkt holds the zeroed
+	// one plus every attribute (including a zeroed Message-Authenticator
+	// placeholder, if any) — exactly the input RFC 2866 §3 / RFC 5997 §3
+	// specify — and patch it into the header. This MUST happen before the
+	// Message-Authenticator is computed below, since that HMAC covers the
+	// packet's real (non-zero) Request Authenticator.
+	if needsAccountingStyleAuth {
+		sum := md5.Sum(append(append([]byte{}, pkt...), []byte(secret)...))
+		copy(pkt[4:20], sum[:])
 	}
 
 	// Patch in the real Message-Authenticator now that the full packet
