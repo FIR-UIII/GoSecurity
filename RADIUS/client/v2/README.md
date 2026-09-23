@@ -142,10 +142,10 @@ than erroring or truncating the value — that's itself a valid fuzz case
 happens so it's visible in the run output, but the packet is still sent.
 
 **`type: packet`** — build a single RADIUS packet entirely from an explicit
-attribute list. Nothing is ever added automatically — in particular, **not**
-a Message-Authenticator — giving full manual control over framing:
+attribute list. Nothing is added automatically beyond what you list in
+`attrs`, giving full manual control over framing:
 ```yaml
-    code: Access-Request              # optional; numeric or name, default Access-Request
+    code: Status-Server               # optional; numeric or name, default Access-Request
     id: 5                             # optional; 0-255, default random
     authenticator: "000102030405060708090a0b0c0d0e0f"   # optional; 16 bytes hex, default random
     attrs:
@@ -154,21 +154,38 @@ a Message-Authenticator — giving full manual control over framing:
         # length: 5                    # optional: override the encoded Length byte
       - type: User-Password
         value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+      - type: NAS-IP-Address
+        value: 127.0.0.1               # dotted-quad text is auto-encoded as the
+                                        # required 4 raw octets, not sent as ASCII text
+      - type: Message-Authenticator    # value/length both omitted: computed for you
+                                        # (RFC 2869 HMAC-MD5 over the whole packet)
 ```
 This is the tool to reach for when you want to test something the normal
 encoder always includes but you want to leave out — most notably, sending a
 request **without a Message-Authenticator attribute at all**: just don't put
-a `type: Message-Authenticator` (or `80`) entry in `attrs`. Because nothing
-is auto-added, this also means: if you want a *valid* Message-Authenticator
-or PAP-encrypted password in the packet, you have to compute and supply it
-yourself (via `hex:`) — `otp`/`fuzz` scenarios already do that automatically
-if that's what you're after instead. Any `attrs[]` entry can also set an
-explicit `length:` to send a deliberately mismatched Length byte, same idea
-as the `fuzz` mode's oversized-value wraparound.
+a `type: Message-Authenticator` (or `80`) entry in `attrs`. If you *do* list
+one but leave both `value:` and `length:` unset, it's computed automatically
+the same way `otp`/`fuzz` scenarios already do it. Giving it an explicit
+`value:` (e.g. `hex:...`) or `length:` opts back out of that and is sent
+exactly as written — useful for testing a deliberately wrong or malformed
+Message-Authenticator. The same applies to a PAP-encrypted `User-Password`:
+there's no automatic PAP encryption here, so supply it yourself via `hex:`.
+Any `attrs[]` entry can also set an explicit `length:` to send a
+deliberately mismatched Length byte, same idea as the `fuzz` mode's
+oversized-value wraparound.
+
+A handful of well-known attributes whose value RFC 2865 requires to be a
+raw 4-octet IPv4 address — `NAS-IP-Address`, `Framed-IP-Address`,
+`Framed-IP-Netmask`, `Login-IP-Host` — get the same treatment: writing
+`value: 127.0.0.1` sends the 4 binary octets, not the 9-byte ASCII string.
+Use `hex:` instead if you need to send something that isn't a well-formed
+IPv4 address for one of these (e.g. to test how a server handles that).
 
 See `client/v2/config.example.yaml` (including a ready-to-run
 "no-message-authenticator" `packet` example with a real, correctly
-PAP-encrypted password) and `client/v2/fuzz.example.txt` for complete
+PAP-encrypted password, and a "status-with-message-authenticator" example
+covering the auto-computed Message-Authenticator + NAS-IP-Address case)
+and `client/v2/fuzz.example.txt` for complete
 working examples covering all four scenario types.
 
 ## Test server
