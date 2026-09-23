@@ -1,29 +1,31 @@
 # RADIUS client v2
 
 A RADIUS test client for appsec testing. Every exchange is logged to
-stdout/stderr: raw packet bytes (hex) in both directions, and the parsed
-attribute list received from the server, e.g.:
+stdout/stderr: raw packet bytes (hex) in both directions, and a
+human-readable dump of the parsed attribute list received from the server,
+e.g.:
 
 ```
-2026/09/22 15:03:07 raw packet to server 01050042735ac97f3471ca30c855126ceb3157a3010a2d74657374666f6f...
-2026/09/22 15:03:07 raw packet from server 03050026a7c0b926b87a5e73fdc05143bed69f2f501276d5ba2ff3ae746cb70e6c340dd4c7ea
-2026/09/22 15:03:07 parsed attributes from server: [{80 [...]}]
-Result: Access-Reject (Invalid credentials)
+2026/09/23 13:05:02 [packet] response 38 bytes: 03ca002666afa67932210cc79e07e98ad608c09150129f138c890217d41ed6eb005cba3034ea
+2026/09/23 13:05:02 [packet] parsed response:
+code: 03 (Access-Reject)
+Identifier: ca
+Length: 0026
+Response Authenticator: 66afa67932210cc79e07e98ad608c091
+Attributes:
+  type: Message-Authenticator, len: 18, value: 9f138c890217d41ed6eb005cba3034ea
 ```
 
 ## Legacy flags (`-mode`)
 
 ```
 go run ./client/v2 -addr localhost:1812 -secret MyRadiusSecret123 -user art -pass 12345 -mode pap
-go run ./client/v2 -addr localhost:1812 -secret MyRadiusSecret123 -user art -pass 12345 -mode pap+otp
 ```
 
-Only `pap` (single Access-Request) and `pap+otp` (two-round PAP, OTP
-hardcoded to `999999` on round 2) are implemented on this path. The `-mode`
-flag's usage text also lists `eap-md5` and `raw`/`fuzz` — those are
-pre-existing unimplemented stubs on the `-mode` path (hitting them panics)
-and are out of scope here. Real `raw` and `fuzz` testing is done through the
-scenario config below instead.
+Only `pap` (single Access-Request) is implemented on this path. The `-mode`
+flag's usage text also lists `eap-md5` — a pre-existing unimplemented stub
+on the `-mode` path (hitting it panics) and out of scope here. Real `raw`
+and `packet` testing is done through the scenario config below instead.
 
 ## Scenario config (`-c` / `-config`)
 
@@ -45,12 +47,13 @@ config's `addr` (or a scenario's own `addr` override) is used instead.
 
 ### Pass/fail with `response:`
 
-Any `otp`, `raw`, `fuzz`, or `packet` scenario may set a `response:` field —
-the RADIUS response code the scenario must get back to count as a pass:
+Any `raw` or `packet` scenario may set a `response:` field — the outcome
+the scenario must get to count as a pass:
 ```yaml
     response: Accept       # short aliases: Accept | Reject | Challenge
     # response: Access-Accept   # or a full RADIUS code name
     # response: 2               # or a numeric code
+    # response: Timeout         # or: assert the server does NOT respond at all
 ```
 Left unset, a scenario is unchanged from before: it passes as long as it ran
 without a network/protocol error, regardless of which code came back. Set
@@ -59,9 +62,14 @@ end-of-run summary (and the process exit non-zero), even though the request
 was sent and a reply was received without error — e.g. `response: Reject` on
 a `raw` scenario asserts the server must reject that packet, and turns an
 unexpected Accept into a reported test failure instead of just a log line.
-For `fuzz`, `response:` applies to **every** case in the wordlist, not just
-one — useful for asserting a server rejects an entire batch of malformed
-requests.
+
+`response: Timeout` is the special case for a request so malformed a
+well-behaved server should silently drop it rather than answer at all (e.g.
+a buffer-underflow probe): the scenario now PASSES on a network read
+timeout instead of FAILING with a "network: read error ... i/o timeout".
+Getting any actual response, or a different kind of network error (e.g.
+connection refused), still FAILS the scenario — only a genuine timeout
+counts as the expected outcome.
 
 ### Config schema
 
@@ -71,23 +79,12 @@ secret: "MyRadiusSecret123"   # top-level default; any scenario may override
 timeout: 5s                   # Go duration string; top-level default (5s if omitted)
 
 scenarios:
-  - name: "otp-happy-path"    # used in logs/summary
-    type: otp                 # raw | fuzz | otp | packet
+  - name: "raw-example"       # used in logs/summary
+    type: raw                 # raw | packet
     # addr / secret / timeout may also be set here to override the top level
-    # response: Accept        # optional pass/fail assertion, see below
+    # response: Reject        # optional pass/fail assertion, see above
     ...
 ```
-
-**`type: otp`** — the two-round PAP+OTP chain. Round 1 sends `username`/
-`password`; if the server answers Access-Challenge, round 2 sends the OTP
-value as the password, echoing back the State attribute from round 1.
-```yaml
-    username: "art"
-    password: "12345"
-    otp: "999999"              # literal OTP value...
-    # otp_env: "RADIUS_TEST_OTP"   # ...or read it from this env var instead
-```
-Exactly one of `otp` / `otp_env` must be set.
 
 **`type: raw`** — send a complete, hand-specified raw UDP datagram, entirely
 outside the normal packet encoder, for malformed/malicious packet testing
@@ -100,46 +97,6 @@ newlines are stripped, so a YAML block scalar works for long packets. The
 response is logged and best-effort parsed — a parse failure is logged, not
 treated as a scenario failure, since a malformed response is itself a valid
 outcome to observe.
-
-**`type: fuzz`** — send one request per line of an appsec-curated wordlist
-file, then optionally flood extra copies of each fuzzed datagram:
-```yaml
-    username: "art"                  # seed credentials for the base request
-    password: "12345"
-    fuzz_file: "client/v2/fuzz.example.txt"
-    post_response_datagrams: 2       # default 0: extra fire-and-forget resends of the same fuzzed datagram after each case's response
-```
-
-#### `fuzz_file` wordlist format
-
-One case per line: `attr:value`. Blank lines and `#` comments are skipped.
-
-- `attr` — a numeric RADIUS attribute type (0-255) or a known name
-  (case-insensitive, see `dictionary.go`), e.g. `User-Password` or `2`.
-- `value` — a literal UTF-8 string, or `hex:<hexstring>` for raw/binary/
-  invalid bytes.
-
-```
-User-Password:hex:00
-User-Name:
-State:hex:00112233
-EAP-Message:hello
-250:hex:deadbeef
-```
-
-For each line, a seed PAP request is built from the scenario's `username`/
-`password`. If `attr` matches an attribute already in the seed (User-Name=1,
-User-Password=2), its value is **replaced** — letting you inject raw or
-malformed bytes directly into those fields, bypassing normal PAP encryption
-for the password. Otherwise the attribute is **appended** alongside the
-valid seed credentials (useful for fuzzing State, EAP-Message, vendor, or
-unknown attribute types while credentials stay valid).
-
-If an attribute's value makes the encoded Length byte exceed 255, the
-Length byte is deliberately allowed to wrap (`byte(2+len(value))`) rather
-than erroring or truncating the value — that's itself a valid fuzz case
-(Length lying about actual payload size). A warning is logged whenever this
-happens so it's visible in the run output, but the packet is still sent.
 
 **`type: packet`** — build a single RADIUS packet entirely from an explicit
 attribute list. Nothing is added automatically beyond what you list in
@@ -164,15 +121,15 @@ This is the tool to reach for when you want to test something the normal
 encoder always includes but you want to leave out — most notably, sending a
 request **without a Message-Authenticator attribute at all**: just don't put
 a `type: Message-Authenticator` (or `80`) entry in `attrs`. If you *do* list
-one but leave both `value:` and `length:` unset, it's computed automatically
-the same way `otp`/`fuzz` scenarios already do it. Giving it an explicit
-`value:` (e.g. `hex:...`) or `length:` opts back out of that and is sent
-exactly as written — useful for testing a deliberately wrong or malformed
-Message-Authenticator. The same applies to a PAP-encrypted `User-Password`:
-there's no automatic PAP encryption here, so supply it yourself via `hex:`.
-Any `attrs[]` entry can also set an explicit `length:` to send a
-deliberately mismatched Length byte, same idea as the `fuzz` mode's
-oversized-value wraparound.
+one but leave both `value:` and `length:` unset, it's computed automatically.
+Giving it an explicit `value:` (e.g. `hex:...`) or `length:` opts back out of
+that and is sent exactly as written — useful for testing a deliberately
+wrong or malformed Message-Authenticator. The same applies to a
+PAP-encrypted `User-Password`: there's no automatic PAP encryption here, so
+supply it yourself via `hex:`. Any `attrs[]` entry can also set an explicit
+`length:` to send a deliberately mismatched Length byte — if the resulting
+2+len(value) exceeds 255, the Length byte deliberately wraps rather than
+erroring, since that's itself a valid thing to want to test.
 
 A handful of well-known attributes whose value RFC 2865 requires to be a
 raw 4-octet IPv4 address — `NAS-IP-Address`, `Framed-IP-Address`,
@@ -193,13 +150,13 @@ with something like "bad authenticator or shared secret"; give an explicit
 `authenticator:` hex value to opt back out and send an arbitrary one on
 purpose instead.
 
-See `client/v2/config.example.yaml` (including a ready-to-run
-"no-message-authenticator" `packet` example with a real, correctly
-PAP-encrypted password, and a "status-with-message-authenticator" example
-covering the auto-computed Message-Authenticator, auto-computed
-accounting-style Request Authenticator, and NAS-IP-Address case)
-and `client/v2/fuzz.example.txt` for complete
-working examples covering all four scenario types.
+See `client/v2/config.example.yaml` for complete working examples covering
+both scenario types, including a ready-to-run "no-message-authenticator"
+`packet` example with a real, correctly PAP-encrypted password, a
+"status-with-message-authenticator" example covering the auto-computed
+Message-Authenticator, auto-computed accounting-style Request
+Authenticator, and NAS-IP-Address case, and a "truncated-authenticator"
+`raw` example demonstrating `response: Timeout`.
 
 ## Test server
 

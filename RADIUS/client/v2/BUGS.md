@@ -33,4 +33,27 @@ Attributes:
     response: Timeout
 
 ===
-убрать из приложения otp fuzz
+#3 убрать из приложения всю логику otp fuzz - не планируется использовать
+
+====
+DONE — all three implemented:
+
+#1: "[packet]"/"[raw]" now log the parsed response with formatParsedResponse
+(challenge.go): code+name, Identifier, Length, Response Authenticator, then
+one "type: X, len: N, value: <hex>" line per attribute (plus a quoted text
+rendering alongside the hex when the value is printable ASCII, e.g.
+Reply-Message). No more single-line %v dump of []Attribute.
+
+#2: response: Timeout is now a valid response: value for raw and packet
+scenarios (isTimeoutResponse/isNetTimeout in packet.go). A network read
+timeout now PASSES such a scenario instead of being reported FAILED; any
+actual response, or a non-timeout network error, still FAILS it. See the
+"truncated-authenticator" example in config.example.yaml (using exactly the
+packet_hex from #2 above).
+
+#3: fuzz.go and fuzz.example.txt deleted; runPAPWithOTP, resolveOTP, the
+"otp"/"fuzz" scenario types (and their now-unused config fields
+username/password/otp/otp_env/fuzz_file/post_response_datagrams), and the
+"-mode pap+otp" CLI mode are all removed. Only "raw" and "packet" scenario
+types remain; "-mode pap" (plain, no OTP) was kept since it wasn't part of
+this ask. README.md and config.example.yaml updated to match.

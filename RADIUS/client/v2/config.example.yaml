@@ -9,20 +9,6 @@ secret: "MyRadiusSecret123"
 timeout: 5s
 
 scenarios:
-  # otp: two-round PAP+OTP chain. Round 1 sends username/password; if the
-  # server answers Access-Challenge, round 2 sends `otp` (or the value of
-  # the env var named by `otp_env`) as the password, echoing back State.
-  # Exactly one of otp / otp_env must be set.
-  - name: "otp-happy-path"
-    type: otp
-    username: "art"
-    password: "12345"
-    otp: "999999"
-    # otp_env: "RADIUS_TEST_OTP"   # alternative to a literal otp: value
-    response: Accept   # expected outcome to pass; also: Reject, Challenge,
-                        # a full name ("Access-Accept"), or a numeric code.
-                        # Omit response entirely to make no assertion.
-
   # raw: send a complete, hand-specified raw UDP datagram, entirely outside
   # the normal packet encoder — for malformed/malicious packet testing
   # (bad lengths, bad codes, garbage attributes, etc.). packet_hex is the
@@ -40,21 +26,20 @@ scenarios:
                         # rejected; if the server instead accepts it, this
                         # scenario is reported FAILED
 
-  # fuzz: send one request per line of fuzz_file (format: "attr:value",
-  # see fuzz.example.txt), built from valid seed credentials (username /
-  # password below), then fire post_response_datagrams extra fire-and-forget
-  # copies of that same datagram after each response.
-  - name: "fuzz-password-field"
-    type: fuzz
-    username: "art"
-    password: "12345"
-    fuzz_file: "client/v2/fuzz.example.txt"
-    post_response_datagrams: 2
-    # response: Reject  # if set, EVERY case in fuzz_file must get this
-                         # response back to pass — e.g. asserting the
-                         # server rejects all of these malformed requests.
-                         # Left commented out here since fuzz.example.txt's
-                         # cases aren't all expected to behave identically.
+  # raw + response: Timeout — the opposite assertion from response: Reject
+  # above: instead of expecting a specific RADIUS code back, this asserts
+  # the server does NOT reply at all within the scenario's timeout. Useful
+  # for a packet so malformed a well-behaved server should silently drop
+  # it (e.g. a buffer-underflow probe) rather than answer with anything —
+  # getting any response at all, or a network error other than a timeout,
+  # both make this FAIL. This example is a Status-Server packet whose
+  # 16-byte Authenticator field has been truncated to 15 bytes (shifting
+  # every attribute after it left by one byte), replace packet_hex with
+  # your own probe.
+  - name: "truncated-authenticator"
+    type: raw
+    packet_hex: "0C3B002B000102030405060708090A0B0C0D0E04067F000001501200000000000000000000000000000000"
+    response: Timeout
 
   # packet: build ONE RADIUS packet entirely from an explicit attribute
   # list. Nothing is ever added automatically — in particular, NOT a
@@ -88,9 +73,9 @@ scenarios:
 
   # packet + auto Message-Authenticator + auto Request Authenticator: a
   # type: Message-Authenticator entry with no value/length is computed for
-  # you (RFC 2869 HMAC-MD5 over the whole packet), the same way otp/fuzz
-  # scenarios already do it — you don't have to precompute and paste in a
-  # hex: value by hand. This also shows NAS-IP-Address taking a normal
+  # you (RFC 2869 HMAC-MD5 over the whole packet) — you don't have to
+  # precompute and paste in a hex: value by hand. This also shows
+  # NAS-IP-Address taking a normal
   # dotted-quad string: it's auto-encoded as the required 4 raw octets,
   # not sent as 9 bytes of ASCII text.
   #

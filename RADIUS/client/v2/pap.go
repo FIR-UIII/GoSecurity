@@ -41,8 +41,8 @@ func exchange(addr, secret string, req, reqAuth []byte, timeout time.Duration) (
 // which is what a caller wanting full manual control over framing (e.g.
 // testing a request with no Message-Authenticator at all) needs.
 //
-// This is shared by buildPAPPacket, the fuzz packet builder (fuzz.go), and
-// the manual packet-scenario builder (packet.go) so this security-sensitive
+// This is shared by buildPAPPacket and the manual packet-scenario builder
+// (packet.go) so this security-sensitive
 // framing math has a single implementation.
 func buildRadiusPacket(secret string, code byte, id *byte, authenticator []byte, attrs []byte, addMessageAuth bool) ([]byte, []byte, error) {
 	// Считаем полную длину кадра (20 байт заголовка + длина атрибутов)
@@ -129,75 +129,9 @@ func runPAP(addr, secret, username, password string, timeout time.Duration) erro
 	case 3:
 		fmt.Println("Result: Access-Reject (Invalid credentials)")
 	case 11:
-		log.Println("Received Access-Challenge: use -mode pap+otp for 2FA")
+		log.Println("Received Access-Challenge")
 	default:
 		return fmt.Errorf("unknown RADIUS code: %d", resp[0])
 	}
 	return nil
-}
-
-// runPAPWithOTP performs a two-round PAP+OTP exchange: round 1 sends the
-// primary credentials, and if the server responds with Access-Challenge,
-// round 2 sends otpCode as the password, echoing back the State attribute
-// from round 1. If expectedResponse is non-empty, the final round's
-// response code is checked against it (see checkExpectedResponse in
-// packet.go); expectedResponse == "" makes no assertion (legacy
-// behavior).
-func runPAPWithOTP(addr, secret, username, password, otpCode, expectedResponse string, timeout time.Duration) error {
-	// Round 1: primary credentials.
-	req1, req1Auth, err := buildPAPPacket(secret, username, password, nil)
-	if err != nil {
-		return fmt.Errorf("build packet: %w", err)
-	}
-	log.Printf("raw packet to server %x, authenticator %x", req1, req1Auth)
-
-	resp1, attrs1, err := exchange(addr, secret, req1, req1Auth, timeout)
-	if err != nil {
-		return err
-	}
-
-	switch resp1[0] {
-	case 2:
-		fmt.Println("Result: Access-Accept (Authentication successful)")
-		return checkExpectedResponse(expectedResponse, resp1[0])
-	case 3:
-		fmt.Println("Result: Access-Reject (Invalid credentials)")
-		return checkExpectedResponse(expectedResponse, resp1[0])
-	case 11:
-		// fall through to round 2
-	default:
-		return fmt.Errorf("unknown RADIUS code: %d", resp1[0])
-	}
-
-	log.Println("Received Access-Challenge (2FA required)")
-	if msg, ok := findAttribute(attrs1, 18); ok {
-		log.Printf("Server prompt: %s", string(msg))
-	}
-
-	state, ok := findAttribute(attrs1, 24)
-	if !ok {
-		return fmt.Errorf("server sent Access-Challenge without State attribute")
-	}
-
-	// Round 2: OTP.
-	req2, req2Auth, err := buildPAPPacket(secret, username, otpCode, state)
-	if err != nil {
-		return fmt.Errorf("build OTP packet: %w", err)
-	}
-	log.Printf("raw challenge %x, authenticator %x", req2, req2Auth)
-
-	resp2, _, err := exchange(addr, secret, req2, req2Auth, timeout)
-	if err != nil {
-		return err
-	}
-
-	switch resp2[0] {
-	case 2:
-		fmt.Println("Result: Access-Accept (2FA Successful!)")
-	case 3:
-		fmt.Println("Result: Access-Reject (Invalid 2FA Code)")
-	default:
-		fmt.Printf("Result: unexpected code %d\n", resp2[0])
-	}
-	return checkExpectedResponse(expectedResponse, resp2[0])
 }

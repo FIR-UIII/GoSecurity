@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
 // Attribute представляет структуру RADIUS TLV
@@ -49,14 +50,48 @@ func parseAttributes(rawPacket []byte) ([]Attribute, error) {
 	return attrs, nil
 }
 
-// findAttribute ищет атрибут по его типу (Type)
-func findAttribute(attrs []Attribute, typ byte) ([]byte, bool) {
+// formatParsedResponse renders resp's header fields and its already-parsed
+// attrs as a multi-line human-readable dump — the raw/packet scenario
+// types' log.Printf("... parsed response:\n%s", ...) is a much easier read
+// than the previous single-line Go %v dump of []Attribute, especially for
+// responses carrying several attributes. Callers must have already
+// confirmed resp parses (e.g. via a successful parseAttributes(resp) call
+// whose result is passed in as attrs).
+func formatParsedResponse(resp []byte, attrs []Attribute) string {
+	var b strings.Builder
+	code := resp[0]
+	fmt.Fprintf(&b, "code: %02x (%s)\n", code, radiusCodeName(code))
+	fmt.Fprintf(&b, "Identifier: %02x\n", resp[1])
+	fmt.Fprintf(&b, "Length: %04x\n", binary.BigEndian.Uint16(resp[2:4]))
+	fmt.Fprintf(&b, "Response Authenticator: %x\n", resp[4:20])
+	b.WriteString("Attributes:")
+	if len(attrs) == 0 {
+		b.WriteString(" (none)")
+		return b.String()
+	}
 	for _, a := range attrs {
-		if a.Type == typ {
-			return a.Value, true
+		fmt.Fprintf(&b, "\n  type: %s, len: %d, value: %x", attrName(a.Type), len(a.Value)+2, a.Value)
+		if isPrintableASCII(a.Value) {
+			fmt.Fprintf(&b, " (%q)", string(a.Value))
 		}
 	}
-	return nil, false
+	return b.String()
+}
+
+// isPrintableASCII reports whether every byte in v is printable
+// (non-empty, no control characters, no bytes above 0x7e) — used by
+// formatParsedResponse to also show a text rendering alongside the hex
+// dump for attributes like Reply-Message that are typically plain text.
+func isPrintableASCII(v []byte) bool {
+	if len(v) == 0 {
+		return false
+	}
+	for _, c := range v {
+		if c < 0x20 || c > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // verifyResponseAuth проверяет, что ответ подписан верным Shared Secret

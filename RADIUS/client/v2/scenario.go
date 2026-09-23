@@ -48,16 +48,8 @@ func runScenario(cfg *Config, sc Scenario, addrOverride string) error {
 	}
 
 	switch sc.Type {
-	case "otp":
-		otp, err := resolveOTP(sc)
-		if err != nil {
-			return fmt.Errorf("resolve otp: %w", err)
-		}
-		return runPAPWithOTP(r.Addr, r.Secret, sc.Username, sc.Password, otp, sc.Response, r.Timeout)
 	case "raw":
 		return runRawScenario(r.Addr, r.Timeout, sc.PacketHex, sc.Response)
-	case "fuzz":
-		return runFuzzScenario(r.Addr, r.Secret, r.Timeout, sc.Username, sc.Password, sc.FuzzFile, sc.Response, sc.PostResponseDatagrams)
 	case "packet":
 		return runPacketScenario(r.Addr, r.Secret, r.Timeout, sc)
 	default:

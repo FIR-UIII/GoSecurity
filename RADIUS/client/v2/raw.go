@@ -19,7 +19,10 @@ import (
 // expected to legitimately fail against a hand-crafted request, and that
 // failure is itself a valid, interesting result for this scenario type, not
 // an error to abort on. If expectedResponse is non-empty, the response's
-// Code byte is checked against it (see checkExpectedResponse in packet.go).
+// Code byte is checked against it (see checkExpectedResponse in packet.go)
+// — or, if expectedResponse is the special value "Timeout", the scenario
+// instead asserts the server does NOT respond at all within timeout (e.g.
+// a malformed packet a well-behaved server should silently drop).
 func runRawScenario(addr string, timeout time.Duration, packetHex, expectedResponse string) error {
 	clean := strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
@@ -36,6 +39,10 @@ func runRawScenario(addr string, timeout time.Duration, packetHex, expectedRespo
 
 	resp, err := sendRawUDP(addr, raw, timeout)
 	if err != nil {
+		if isTimeoutResponse(expectedResponse) && isNetTimeout(err) {
+			log.Printf("[raw] no response within timeout, as expected (response: Timeout)")
+			return nil
+		}
 		return fmt.Errorf("network: %w", err)
 	}
 	log.Printf("[raw] response %d bytes: %x", len(resp), resp)
@@ -43,7 +50,11 @@ func runRawScenario(addr string, timeout time.Duration, packetHex, expectedRespo
 	if attrs, perr := parseAttributes(resp); perr != nil {
 		log.Printf("[raw] response did not parse as well-formed RADIUS attributes: %v", perr)
 	} else {
-		log.Printf("[raw] parsed response attributes: %v", attrs)
+		log.Printf("[raw] parsed response:\n%s", formatParsedResponse(resp, attrs))
+	}
+
+	if isTimeoutResponse(expectedResponse) {
+		return fmt.Errorf("expected no response (Timeout), but got a %d-byte response", len(resp))
 	}
 
 	if len(resp) == 0 {

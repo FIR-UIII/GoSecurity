@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -107,6 +108,52 @@ func checkExpectedResponse(expected string, got byte) error {
 	return nil
 }
 
+// isTimeoutResponse reports whether s is the special "Timeout" response:
+// value (case-insensitive, surrounding whitespace ignored). It asserts the
+// opposite of every other response: value: that the server must NOT reply
+// within the configured timeout at all — e.g. a malformed/hostile packet
+// that a well-behaved server should silently drop rather than answer.
+func isTimeoutResponse(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), "timeout")
+}
+
+// isNetTimeout reports whether err is specifically a network timeout, as
+// opposed to some other network failure (connection refused, unreachable
+// host, etc.) — so a response: Timeout scenario can tell "the server never
+// replied, as expected" apart from a different, still-unexpected failure.
+func isNetTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// parseAttrValue interprets an AttrSpec.Value string as hex:<hexstring>
+// (raw/binary/invalid bytes) or, otherwise, a literal UTF-8 string.
+func parseAttrValue(s string) ([]byte, error) {
+	if rest, ok := strings.CutPrefix(s, "hex:"); ok {
+		b, err := hex.DecodeString(strings.TrimSpace(rest))
+		if err != nil {
+			return nil, fmt.Errorf("decode hex value: %w", err)
+		}
+		return b, nil
+	}
+	return []byte(s), nil
+}
+
+// appendAttr appends Type|Length|Value to attrs. If 2+len(value) exceeds
+// 255, the Length byte deliberately wraps (byte(2+len(value))) rather than
+// erroring or truncating value — an oversized value is itself a valid,
+// intentional thing to want to send here (Length lying about actual
+// payload size). A warning is logged so the wrap is visible in run output.
+func appendAttr(attrs []byte, typ byte, value []byte) []byte {
+	if 2+len(value) > 255 {
+		log.Printf("[packet] warning: attr %d (%s) value is %d bytes; length byte wraps to %d",
+			typ, attrName(typ), len(value), byte(2+len(value)))
+	}
+	attrs = append(attrs, typ, byte(2+len(value)))
+	attrs = append(attrs, value...)
+	return attrs
+}
+
 // ipv4Attrs are the well-known RADIUS attributes whose Value MUST be the
 // raw 4-octet binary form of an IPv4 address (RFC 2865 §5.4, §5.8, §5.9,
 // §5.14), not its dotted-quad text representation. See maybeEncodeIPv4.
@@ -175,7 +222,7 @@ func appendAttrSpec(attrs []byte, spec AttrSpec) ([]byte, int, error) {
 		return attrs, valOffset, nil
 	}
 
-	val, err := parseFuzzValue(spec.Value)
+	val, err := parseAttrValue(spec.Value)
 	if err != nil {
 		return nil, -1, err
 	}
@@ -198,10 +245,10 @@ func appendAttrSpec(attrs []byte, spec AttrSpec) ([]byte, int, error) {
 // type-80 entry out of attrs entirely.
 //
 // A type-80 (Message-Authenticator) entry that gives neither value nor
-// length IS computed automatically (see appendAttrSpec), the same as
-// otp/raw/fuzz scenarios already do — full manual control is still
-// available by supplying an explicit value: (e.g. hex:...) or length:,
-// which is treated as deliberate and left completely untouched.
+// length IS computed automatically (see appendAttrSpec) — full manual
+// control is still available by supplying an explicit value: (e.g.
+// hex:...) or length:, which is treated as deliberate and left completely
+// untouched.
 func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) error {
 	code, err := resolveRadiusCode(sc.Code)
 	if err != nil {
@@ -292,6 +339,10 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 
 	resp, err := sendRawUDP(addr, pkt, timeout)
 	if err != nil {
+		if isTimeoutResponse(sc.Response) && isNetTimeout(err) {
+			log.Printf("[packet] no response within timeout, as expected (response: Timeout)")
+			return nil
+		}
 		return fmt.Errorf("network: %w", err)
 	}
 	log.Printf("[packet] response %d bytes: %x", len(resp), resp)
@@ -299,7 +350,11 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 	if parsed, perr := parseAttributes(resp); perr != nil {
 		log.Printf("[packet] response did not parse as well-formed RADIUS attributes: %v", perr)
 	} else {
-		log.Printf("[packet] parsed response attributes: %v", parsed)
+		log.Printf("[packet] parsed response:\n%s", formatParsedResponse(resp, parsed))
+	}
+
+	if isTimeoutResponse(sc.Response) {
+		return fmt.Errorf("expected no response (Timeout), but got a %d-byte response", len(resp))
 	}
 
 	if len(resp) == 0 {

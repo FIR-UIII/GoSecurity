@@ -8,7 +8,7 @@ import (
 
 // attrNames maps well-known RADIUS attribute type numbers (RFC 2865, 2866,
 // 2869, 3579) to their display names, used for human-readable logging and
-// for resolving attribute names in fuzz.txt wordlists.
+// for resolving a "packet" scenario's attrs[].type by name.
 //
 // This is v2's own independent copy of the same concept used by client/v1's
 // dictionary.go — kept separate on purpose so v2 has no dependency on v1.
@@ -69,8 +69,8 @@ var attrNames = map[byte]string{
 	87: "NAS-Port-Id",
 }
 
-// attrNameToType is the reverse lookup (lowercased), used to parse fuzz.txt
-// attribute tokens given by name instead of numeric type.
+// attrNameToType is the reverse lookup (lowercased), used to parse an
+// attrs[].type token given by name instead of numeric type.
 var attrNameToType = func() map[string]byte {
 	m := make(map[string]byte, len(attrNames))
 	for t, name := range attrNames {
@@ -87,9 +87,9 @@ func attrName(t byte) string {
 	return "Unknown"
 }
 
-// resolveAttrType parses a fuzz.txt "attr" token into a RADIUS attribute
-// type number: a plain integer (0-255) is used directly, otherwise the
-// token is looked up case-insensitively in attrNameToType.
+// resolveAttrType parses a "packet" scenario's attrs[].type token into a
+// RADIUS attribute type number: a plain integer (0-255) is used directly,
+// otherwise the token is looked up case-insensitively in attrNameToType.
 func resolveAttrType(token string) (byte, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {

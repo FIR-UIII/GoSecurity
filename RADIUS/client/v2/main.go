@@ -11,7 +11,7 @@ func main() {
 	secret := flag.String("secret", "secret", "shared secret")
 	username := flag.String("user", "art", "username")
 	password := flag.String("pass", "12345", "password")
-	mode := flag.String("mode", "eap-md5", "test mode: pap | eap-md5 | raw | fuzz")
+	mode := flag.String("mode", "eap-md5", "test mode: pap | eap-md5")
 	configPath := flag.String("c", "", "path to YAML scenario config; when set, runs scenarios instead of -mode")
 	flag.StringVar(configPath, "config", "", "alias for -c")
 
@@ -47,11 +47,6 @@ func main() {
 		err := runPAP(*addr, *secret, *username, *password, 5*time.Second)
 		if err != nil {
 			log.Fatalf("PAP exchange failed: %v", err)
-		}
-	case "pap+otp":
-		err := runPAPWithOTP(*addr, *secret, *username, *password, "999999", "", 5*time.Second)
-		if err != nil {
-			log.Fatalf("PAP+OTP exchange failed: %v", err)
 		}
 	default:
 		panic("unknown mode: " + *mode)

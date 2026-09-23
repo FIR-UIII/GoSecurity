@@ -22,32 +22,25 @@ type Config struct {
 // type.
 type Scenario struct {
 	Name    string `yaml:"name"`
-	Type    string `yaml:"type"` // "raw" | "fuzz" | "otp" | "packet"
+	Type    string `yaml:"type"` // "raw" | "packet"
 	Addr    string `yaml:"addr"`
 	Secret  string `yaml:"secret"`
 	Timeout string `yaml:"timeout"`
 
-	// Response, if set, is the RADIUS response code this scenario must get
-	// back to count as a pass (numeric, a full name like "Access-Accept",
-	// or a short alias: "Accept" | "Reject" | "Challenge"). Applies to
-	// otp, raw, fuzz, and packet. Left empty, no assertion is made and the
-	// scenario passes as long as it ran without a network/protocol error
-	// (today's default behavior). For "fuzz", every case in the wordlist
-	// is checked against it, not just the last one.
+	// Response, if set, is the outcome this scenario must get to count as
+	// a pass. It's either the RADIUS response code (numeric, a full name
+	// like "Access-Accept", or a short alias: "Accept" | "Reject" |
+	// "Challenge") the scenario must get back, or the special value
+	// "Timeout" asserting the opposite — that the server must NOT respond
+	// at all within the configured timeout (e.g. a malformed packet a
+	// well-behaved server should silently drop). Applies to raw and
+	// packet. Left empty, no assertion is made and the scenario passes as
+	// long as it ran without a network/protocol error (today's default
+	// behavior).
 	Response string `yaml:"response"`
-
-	// otp
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	OTP      string `yaml:"otp"`
-	OTPEnv   string `yaml:"otp_env"`
 
 	// raw
 	PacketHex string `yaml:"packet_hex"`
-
-	// fuzz
-	FuzzFile              string `yaml:"fuzz_file"`
-	PostResponseDatagrams int    `yaml:"post_response_datagrams"`
 
 	// packet: builds one RADIUS packet entirely from these explicit
 	// fields — nothing is added automatically beyond what Attrs lists.
@@ -74,7 +67,7 @@ type Scenario struct {
 // AttrSpec is one explicit attribute in a "packet" scenario's Attrs list.
 type AttrSpec struct {
 	Type   string `yaml:"type"`   // numeric RADIUS type (0-255) or a known name (see dictionary.go)
-	Length *int   `yaml:"length"` // explicit Length byte override; omitted = 2+len(value) (with the same oversized-value wrap as fuzz mode)
+	Length *int   `yaml:"length"` // explicit Length byte override; omitted = 2+len(value) (with the same oversized-value wrap as appendAttr's default encoding)
 	Value  string `yaml:"value"`  // literal UTF-8 string, or hex:<hexstring>
 }
 
@@ -92,8 +85,7 @@ func loadConfig(path string) (*Config, error) {
 }
 
 // validate checks required fields per scenario Type, rejects unknown Type
-// values and duplicate scenario names, and enforces the otp/otp_env
-// mutual-exclusivity rule.
+// values and duplicate scenario names.
 func (c *Config) validate() error {
 	if len(c.Scenarios) == 0 {
 		return fmt.Errorf("config has no scenarios")
@@ -111,36 +103,16 @@ func (c *Config) validate() error {
 			seen[sc.Name] = true
 		}
 
-		if sc.Response != "" {
+		if sc.Response != "" && !isTimeoutResponse(sc.Response) {
 			if _, err := resolveExpectedResponse(sc.Response); err != nil {
 				return fmt.Errorf("scenario %s: response: %w", label, err)
 			}
 		}
 
 		switch sc.Type {
-		case "otp":
-			if sc.Username == "" || sc.Password == "" {
-				return fmt.Errorf("scenario %s: type otp requires username and password", label)
-			}
-			if sc.OTP == "" && sc.OTPEnv == "" {
-				return fmt.Errorf("scenario %s: type otp requires exactly one of otp or otp_env", label)
-			}
-			if sc.OTP != "" && sc.OTPEnv != "" {
-				return fmt.Errorf("scenario %s: otp and otp_env are mutually exclusive", label)
-			}
 		case "raw":
 			if sc.PacketHex == "" {
 				return fmt.Errorf("scenario %s: type raw requires packet_hex", label)
-			}
-		case "fuzz":
-			if sc.FuzzFile == "" {
-				return fmt.Errorf("scenario %s: type fuzz requires fuzz_file", label)
-			}
-			if sc.Username == "" || sc.Password == "" {
-				return fmt.Errorf("scenario %s: type fuzz requires username and password (seed credentials)", label)
-			}
-			if sc.PostResponseDatagrams < 0 {
-				return fmt.Errorf("scenario %s: post_response_datagrams must be >= 0", label)
 			}
 		case "packet":
 			if len(sc.Attrs) == 0 {
@@ -166,7 +138,7 @@ func (c *Config) validate() error {
 		case "":
 			return fmt.Errorf("scenario %s: missing type", label)
 		default:
-			return fmt.Errorf("scenario %s: unknown type %q (want raw, fuzz, otp, or packet)", label, sc.Type)
+			return fmt.Errorf("scenario %s: unknown type %q (want raw or packet)", label, sc.Type)
 		}
 	}
 	return nil
@@ -202,20 +174,6 @@ func resolveScenario(cfg *Config, sc Scenario) (resolved, error) {
 		return resolved{}, fmt.Errorf("no addr configured (set addr at top level or on the scenario)")
 	}
 	return r, nil
-}
-
-// resolveOTP returns sc.OTP if set, else the value of the environment
-// variable named by sc.OTPEnv. validate() already guarantees exactly one of
-// the two is set, and this also errors if otp_env names an unset/empty var.
-func resolveOTP(sc Scenario) (string, error) {
-	if sc.OTP != "" {
-		return sc.OTP, nil
-	}
-	v, ok := os.LookupEnv(sc.OTPEnv)
-	if !ok || v == "" {
-		return "", fmt.Errorf("otp_env %q is unset or empty", sc.OTPEnv)
-	}
-	return v, nil
 }
 
 func firstNonEmpty(vals ...string) string {
