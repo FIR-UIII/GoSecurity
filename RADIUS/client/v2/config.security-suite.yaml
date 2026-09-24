@@ -8,8 +8,8 @@
 # See client/v2/README.md for the full schema of each scenario type
 # (raw | packet | fuzz | challenge).
 
-addr: "CHANGEME:1812"     # target host:port
-secret: "CHANGEME"         # shared secret
+addr: "debug.diam.rosatom.local:1812"
+secret: "sdnfasfaspfbaisbudfiabsdipbasipdbfip"
 timeout: 5s
 
 scenarios:
@@ -225,6 +225,21 @@ scenarios:
   # ============================================================
   # 4. Framing / malformed packets — byte-level parser robustness
   # ============================================================
+  - name: "Поле Authenticator меньше 16 байт (15 байт)"
+    type: raw
+    packet_hex: "0C3B002B000102030405060708090A0B0C0D0E04067F000001501200000000000000000000000000000000"
+    response: Timeout
+
+  - name: "Поле Authenticator больше 16 байт (17 байт)"
+    type: raw
+    packet_hex: "0C3B002D000102030405060708090A0B0C0D0E0FFF04067F000001501200000000000000000000000000000000"
+    response: Timeout
+
+  - name: "Ошибка сериализации (Несовпадение Length и реального размера)"
+    type: raw
+    packet_hex: "0C3B003A000102030405060708090A0B0C0D0E0F04067F000001501200000000000000000000000000000000"
+    response: Timeout
+  
   - name: "length-field-too-large"
     type: raw
     packet_hex: "0101006400000000000000000000000000000000"
@@ -269,10 +284,7 @@ scenarios:
         value: "radsectest01"
       - type: NAS-Identifier
         value: "RADIUStesting:radiussectest"
-    # no response: — this server is documented as only handling
-    # Access-Request/Accounting-Request; just observe what an unknown
-    # Code gets back (ideally: nothing — add response: Timeout once
-    # you've confirmed that's actually the server's behavior)
+    response: Timeout
 
   # ============================================================
   # 5. User-Password / PAP encoding edge cases
@@ -319,41 +331,7 @@ scenarios:
     # CHAP-Password attribute is ignored (expected) or confuses it
 
   # ============================================================
-  # 6. Structural attribute fuzzing (see fuzz.go for the mutator list)
-  # ============================================================
-  - name: "fuzz-full-suite"
-    type: fuzz
-    attrs:
-      - type: User-Name
-        value: "radsectest01"
-      - type: NAS-Identifier
-        value: "RADIUStesting:radiussectest"
-      - type: User-Password
-        value: "123"
-      - type: Message-Authenticator
-    iterations: 300
-    healthcheck_every: 30
-    # seed: 1234567890   # set this to reproduce a specific run exactly
-
-  - name: "fuzz-message-authenticator-only"
-    type: fuzz
-    attrs:
-      - type: User-Name
-        value: "radsectest01"
-      - type: NAS-Identifier
-        value: "RADIUStesting:radiussectest"
-      - type: User-Password
-        value: "123"
-      - type: Message-Authenticator
-    iterations: 100
-    strategies: [message_authenticator_tamper]
-    healthcheck_every: 20
-    # pair this with external timing measurements (e.g. wrap the run and
-    # log response latency per iteration) to check for a non-constant-time
-    # Message-Authenticator comparison on the server
-
-  # ============================================================
-  # 7. Access-Challenge / OTP flow — confirmed supported by this server.
+  # 6. Access-Challenge / OTP flow — confirmed supported by this server.
   #    The real OTP is delivered out-of-band (app/email) and can't be
   #    scripted, so these scenarios deliberately do NOT try to guess it.
   #    max_attempts is kept small ON PURPOSE: this hits a real external

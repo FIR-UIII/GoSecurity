@@ -1,0 +1,48 @@
+# Security test suite for a real target RADIUS server: plain PAP over
+# bare UDP (no RadSec/TLS), Message-Authenticator supported, and
+# Access-Challenge/OTP supported (OTP delivered out-of-band via app or
+# email). This is a DIFFERENT target than config.example.yaml's local
+# docker FreeRADIUS ("art"/"12345") — fill in the real addr/secret below,
+# and only run this against a server/account you're authorized to test.
+#
+# See client/v2/README.md for the full schema of each scenario type
+# (raw | packet | fuzz | challenge).
+
+addr: "debug.diam.rosatom.local:1812"
+secret: "sdnfasfaspfbaisbudfiabsdipbasipdbfip"
+timeout: 5s
+
+scenarios:
+  # ============================================================
+  # Structural attribute fuzzing (see fuzz.go for the mutator list)
+  # ============================================================
+  - name: "fuzz-full-suite"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 300
+    healthcheck_every: 30
+    # seed: 1234567890   # set this to reproduce a specific run exactly
+
+  - name: "fuzz-message-authenticator-only"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 100
+    strategies: [message_authenticator_tamper]
+    healthcheck_every: 20
+    # pair this with external timing measurements (e.g. wrap the run and
+    # log response latency per iteration) to check for a non-constant-time
+    # Message-Authenticator comparison on the server
