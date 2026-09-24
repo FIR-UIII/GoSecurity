@@ -98,3 +98,47 @@ scenarios:
                         # require_message_authenticator = no, so a valid,
                         # correctly authenticated Status-Server request
                         # should be accepted
+
+  # fuzz: structural attribute fuzzer. Takes the same seed-packet fields as
+  # type: packet (this is the same genuinely valid "art"/"12345" PAP
+  # request as the no-message-authenticator example above) and sends
+  # `iterations` mutated variants of it, round-robining through every
+  # registered mutator (length lies, duplicated/missing/oversized/empty
+  # attributes, unknown types, bit flips, truncation, a tampered
+  # Message-Authenticator). The seed itself is sent unmutated first as a
+  # health-check (must come back Accept) and again every
+  # healthcheck_every iterations, to catch the server dying/hanging
+  # partway through. Any mutated packet that still comes back
+  # Access-Accept is logged as a finding and fails the scenario.
+  - name: "fuzz-attrs-example"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "art"
+      - type: User-Password
+        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+    iterations: 100
+    healthcheck_every: 20
+    # seed: 1234567890         # set this to reproduce a specific run exactly
+    # strategies: [length_mismatch, bit_flip, truncate]   # omit for all mutators
+
+  # challenge: stateful Access-Challenge/OTP fuzzer. Sends the attrs below
+  # as a FIRST Access-Request that must get an Access-Challenge back, then
+  # brute-forces a numeric OTP against the returned State. This repo's own
+  # FreeRADIUS test config (.raddb/authorize) doesn't actually run an
+  # OTP/challenge module for "art" — a plain PAP user — so running this
+  # against the docker test server will fail fast at "expected
+  # Access-Challenge, got code 3 (Access-Reject)"; that failure is itself
+  # the correct, expected outcome for this test server. This example
+  # exists to demonstrate the schema against a server that does issue
+  # Access-Challenge + State for OTP login.
+  - name: "otp-bruteforce-example"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "art"
+    otp_min: 0
+    otp_max: 999999
+    max_attempts: 50     # kept small here deliberately; raise for a real brute-force run
+    state_checks: [bit_flip, drop]

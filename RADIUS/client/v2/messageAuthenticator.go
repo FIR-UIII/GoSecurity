@@ -44,12 +44,22 @@ func verifyMessageAuthenticator(resp []byte, reqAuth []byte, secret string) bool
 	var maValue []byte
 	var maOffset int
 
-	// Проходим по байтам ответа и находим где лежит атрибут 80
+	// Проходим по байтам ответа и находим где лежит атрибут 80.
+	// resp has already been through a successful parseAttributes(resp)
+	// above, but that only guarantees attrBytes = resp[20:totalLen] is
+	// well-formed up to a possible dangling trailing byte (which
+	// parseAttributes silently stops at rather than erroring on) — this
+	// walk needs the exact same bounds guards parseAttributes uses
+	// (length >= 2, i+length within totalLen) or a malformed trailing
+	// attribute can read resp[i+1] one byte past the end of resp.
 	totalLen := int(binary.BigEndian.Uint16(resp[2:4]))
 	i := 20
-	for i < totalLen {
+	for totalLen-i >= 2 {
 		typ := resp[i]
 		length := int(resp[i+1])
+		if length < 2 || i+length > totalLen {
+			break
+		}
 		if typ == 80 && length == 18 {
 			maOffset = i + 2
 			maValue = make([]byte, 16)

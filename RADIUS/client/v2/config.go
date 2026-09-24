@@ -59,9 +59,36 @@ type Scenario struct {
 	// being random — required by some servers (though this repo's own
 	// FreeRADIUS test config happens not to enforce it).
 	Code          string     `yaml:"code"`          // RADIUS code, numeric or name (e.g. "Access-Request"); default Access-Request
-	ID            *int       `yaml:"id"`             // Identifier byte (0-255); omitted = random
-	Authenticator string     `yaml:"authenticator"`  // 16-byte Request Authenticator, hex; omitted = random
+	ID            *int       `yaml:"id"`            // Identifier byte (0-255); omitted = random
+	Authenticator string     `yaml:"authenticator"` // 16-byte Request Authenticator, hex; omitted = random
 	Attrs         []AttrSpec `yaml:"attrs"`
+
+	// fuzz: mutates the Code/ID/Authenticator/Attrs seed packet above
+	// (same fields as type: packet) across Iterations sent packets,
+	// applying one of Strategies (round-robin) each time. See fuzz.go for
+	// the mutator registry and runFuzzScenario for the finding/
+	// health-check logic.
+	Iterations       int      `yaml:"iterations"`        // required (> 0): number of mutated packets to send
+	Seed             *int64   `yaml:"seed"`              // optional PRNG seed for a reproducible run; random (and logged) if omitted
+	Strategies       []string `yaml:"strategies"`        // optional subset of mutator names; default: all registered mutators
+	HealthcheckEvery int      `yaml:"healthcheck_every"` // optional: resend the unmutated seed every N iterations to detect server death/hang; default 20
+	ExpectNoAccept   *bool    `yaml:"expect_no_accept"`  // optional: flag any mutated packet that gets Access-Accept as a finding; default true
+
+	// challenge: drives Code/ID/Authenticator/Attrs above as the FIRST
+	// Access-Request (must get an Access-Challenge back), then
+	// brute-forces a numeric OTP in OTPAttr against the returned State
+	// across up to MaxAttempts second requests, checking rate-limiting/
+	// lockout behavior and whether State stays valid/reusable across many
+	// wrong guesses. See stateful.go.
+	OTPAttr     string   `yaml:"otp_attr"`     // attribute carrying the OTP guess; default User-Password
+	OTPMin      *int     `yaml:"otp_min"`      // numeric OTP range start (required)
+	OTPMax      *int     `yaml:"otp_max"`      // numeric OTP range end (required)
+	OTPDigits   int      `yaml:"otp_digits"`   // zero-padded width; default = digit count of otp_max
+	OTPOrder    string   `yaml:"otp_order"`    // "sequential" | "random"; default sequential
+	MaxAttempts int      `yaml:"max_attempts"` // required (> 0): hard cap on attempts sent — mandatory safety bound
+	StateReuse  *bool    `yaml:"state_reuse"`  // default true: replay the ORIGINAL State every attempt (tests reuse/lockout)
+	Delay       string   `yaml:"delay"`        // optional Go duration between attempts; default 0
+	StateChecks []string `yaml:"state_checks"` // optional one-shot probes after the loop: bit_flip | truncate | foreign | drop
 }
 
 // AttrSpec is one explicit attribute in a "packet" scenario's Attrs list.
@@ -118,27 +145,86 @@ func (c *Config) validate() error {
 			if len(sc.Attrs) == 0 {
 				return fmt.Errorf("scenario %s: type packet requires at least one entry in attrs", label)
 			}
-			if sc.ID != nil && (*sc.ID < 0 || *sc.ID > 255) {
-				return fmt.Errorf("scenario %s: id must be 0-255", label)
+			if err := validateSeedPacket(sc); err != nil {
+				return fmt.Errorf("scenario %s: %w", label, err)
 			}
-			if sc.Authenticator != "" {
-				b, err := hex.DecodeString(sc.Authenticator)
-				if err != nil || len(b) != 16 {
-					return fmt.Errorf("scenario %s: authenticator must be exactly 16 bytes of hex", label)
+		case "fuzz":
+			if len(sc.Attrs) == 0 {
+				return fmt.Errorf("scenario %s: type fuzz requires at least one entry in attrs (the seed packet)", label)
+			}
+			if err := validateSeedPacket(sc); err != nil {
+				return fmt.Errorf("scenario %s: %w", label, err)
+			}
+			if sc.Iterations <= 0 {
+				return fmt.Errorf("scenario %s: type fuzz requires iterations > 0", label)
+			}
+			if sc.HealthcheckEvery < 0 {
+				return fmt.Errorf("scenario %s: healthcheck_every must be >= 0", label)
+			}
+			for _, s := range sc.Strategies {
+				if !isKnownFuzzStrategy(s) {
+					return fmt.Errorf("scenario %s: unknown fuzz strategy %q", label, s)
 				}
 			}
-			for i, a := range sc.Attrs {
-				if a.Type == "" {
-					return fmt.Errorf("scenario %s: attrs[%d]: missing type", label, i)
+		case "challenge":
+			if len(sc.Attrs) == 0 {
+				return fmt.Errorf("scenario %s: type challenge requires at least one entry in attrs (the first Access-Request)", label)
+			}
+			if err := validateSeedPacket(sc); err != nil {
+				return fmt.Errorf("scenario %s: %w", label, err)
+			}
+			if sc.OTPMin == nil || sc.OTPMax == nil {
+				return fmt.Errorf("scenario %s: type challenge requires otp_min and otp_max", label)
+			}
+			if *sc.OTPMin < 0 || *sc.OTPMax < *sc.OTPMin {
+				return fmt.Errorf("scenario %s: otp_min/otp_max must satisfy 0 <= otp_min <= otp_max", label)
+			}
+			if sc.MaxAttempts <= 0 {
+				return fmt.Errorf("scenario %s: type challenge requires max_attempts > 0", label)
+			}
+			switch sc.OTPOrder {
+			case "", "sequential", "random":
+			default:
+				return fmt.Errorf("scenario %s: otp_order must be \"sequential\" or \"random\"", label)
+			}
+			if sc.Delay != "" {
+				if _, err := time.ParseDuration(sc.Delay); err != nil {
+					return fmt.Errorf("scenario %s: invalid delay %q: %w", label, sc.Delay, err)
 				}
-				if a.Length != nil && (*a.Length < 0 || *a.Length > 255) {
-					return fmt.Errorf("scenario %s: attrs[%d]: length must be 0-255", label, i)
+			}
+			for _, s := range sc.StateChecks {
+				if !isKnownStateCheck(s) {
+					return fmt.Errorf("scenario %s: unknown state_checks entry %q", label, s)
 				}
 			}
 		case "":
 			return fmt.Errorf("scenario %s: missing type", label)
 		default:
-			return fmt.Errorf("scenario %s: unknown type %q (want raw or packet)", label, sc.Type)
+			return fmt.Errorf("scenario %s: unknown type %q (want raw, packet, fuzz, or challenge)", label, sc.Type)
+		}
+	}
+	return nil
+}
+
+// validateSeedPacket checks the id/authenticator/attrs fields shared by
+// the packet, fuzz, and challenge scenario types (all of which build at
+// least one packet from Code/ID/Authenticator/Attrs).
+func validateSeedPacket(sc Scenario) error {
+	if sc.ID != nil && (*sc.ID < 0 || *sc.ID > 255) {
+		return fmt.Errorf("id must be 0-255")
+	}
+	if sc.Authenticator != "" {
+		b, err := hex.DecodeString(sc.Authenticator)
+		if err != nil || len(b) != 16 {
+			return fmt.Errorf("authenticator must be exactly 16 bytes of hex")
+		}
+	}
+	for i, a := range sc.Attrs {
+		if a.Type == "" {
+			return fmt.Errorf("attrs[%d]: missing type", i)
+		}
+		if a.Length != nil && (*a.Length < 0 || *a.Length > 255) {
+			return fmt.Errorf("attrs[%d]: length must be 0-255", i)
 		}
 	}
 	return nil

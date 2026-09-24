@@ -236,80 +236,61 @@ func appendAttrSpec(attrs []byte, spec AttrSpec) ([]byte, int, error) {
 	return appendAttr(attrs, typ, val), -1, nil
 }
 
-// runPacketScenario builds a single RADIUS packet entirely from sc's
-// explicit code/id/authenticator/attrs fields. Nothing is ever added
-// automatically that isn't explicitly listed in attrs — giving full manual
-// control over framing. This is the scenario type to reach for when
-// testing how a server handles a request missing something the normal
-// encoder would always include, e.g. Message-Authenticator: just leave any
-// type-80 entry out of attrs entirely.
+// buildPacketFromSpec builds a single RADIUS packet entirely from explicit
+// code/id/authenticator/attrs values — the same manual-framing logic
+// runPacketScenario uses, extracted so other callers (the fuzz scenario
+// type's mutation loop) can build one-off packets from a mutated attrs
+// list without going through a full Scenario/log/response-check cycle.
 //
-// A type-80 (Message-Authenticator) entry that gives neither value nor
-// length IS computed automatically (see appendAttrSpec) — full manual
-// control is still available by supplying an explicit value: (e.g.
-// hex:...) or length:, which is treated as deliberate and left completely
-// untouched.
-func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) error {
-	code, err := resolveRadiusCode(sc.Code)
-	if err != nil {
-		return err
-	}
-
-	var id *byte
-	if sc.ID != nil {
-		b := byte(*sc.ID)
-		id = &b
-	}
-
-	// Accounting-Request and Status-Server have no User-Password to drive
-	// the choice of Request Authenticator, so RFC 5997 §3 requires
-	// Status-Server (like RFC 2866 §3 for Accounting-Request) to use it as
-	// an integrity check instead: MD5(header-with-zeroed-authenticator +
-	// attributes + secret), NOT an arbitrary/random value. A random
-	// authenticator here — which is what every other code uses — makes a
-	// strict server (this repo's own FreeRADIUS test config happens not
-	// to enforce it, but others, e.g. tinyradius, do) reject the packet
-	// with something like "bad authenticator or shared secret". It's
-	// computed below, once the rest of the packet (in particular any
-	// Message-Authenticator placeholder) is known; skipped entirely if an
-	// explicit authenticator: was given, since that's a deliberate
-	// full-manual-control override (e.g. to test a wrong one on purpose).
-	needsAccountingStyleAuth := sc.Authenticator == "" && (code == 4 || code == 12)
+// Nothing is added automatically beyond what attrs lists. A type-80
+// (Message-Authenticator) entry that gives neither value nor length IS
+// computed automatically (see appendAttrSpec); an explicit value:/length:
+// opts out of that, same as runPacketScenario. authenticatorHex empty
+// means: generate one (accounting-style integrity-check authenticator for
+// Accounting-Request/Status-Server per RFC 2866 §3 / RFC 5997 §3, random
+// otherwise); a non-empty authenticatorHex is decoded and used exactly as
+// given.
+func buildPacketFromSpec(secret string, code byte, id *byte, authenticatorHex string, attrs []AttrSpec) ([]byte, error) {
+	// See runPacketScenario's original comment: Accounting-Request/
+	// Status-Server use the Request Authenticator as an integrity check
+	// (MD5 of header+attrs+secret), not random data.
+	needsAccountingStyleAuth := authenticatorHex == "" && (code == 4 || code == 12)
 
 	var authenticator []byte
-	if sc.Authenticator != "" {
-		authenticator, err = hex.DecodeString(sc.Authenticator)
+	var err error
+	if authenticatorHex != "" {
+		authenticator, err = hex.DecodeString(authenticatorHex)
 		if err != nil {
-			return fmt.Errorf("decode authenticator: %w", err)
+			return nil, fmt.Errorf("decode authenticator: %w", err)
 		}
 	} else if needsAccountingStyleAuth {
 		authenticator = make([]byte, 16) // placeholder; computed for real below
 	} else {
 		authenticator = make([]byte, 16)
 		if _, err := rand.Read(authenticator); err != nil {
-			return fmt.Errorf("generate authenticator: %w", err)
+			return nil, fmt.Errorf("generate authenticator: %w", err)
 		}
 	}
 
-	var attrs []byte
-	maValOffset := -1 // offset within attrs of an auto Message-Authenticator's 16 zero bytes, or -1
-	for i, spec := range sc.Attrs {
+	var attrBytes []byte
+	maValOffset := -1 // offset within attrBytes of an auto Message-Authenticator's 16 zero bytes, or -1
+	for i, spec := range attrs {
 		var off int
-		attrs, off, err = appendAttrSpec(attrs, spec)
+		attrBytes, off, err = appendAttrSpec(attrBytes, spec)
 		if err != nil {
-			return fmt.Errorf("attrs[%d]: %w", i, err)
+			return nil, fmt.Errorf("attrs[%d]: %w", i, err)
 		}
 		if off >= 0 {
 			if maValOffset >= 0 {
-				return fmt.Errorf("attrs[%d]: only one auto-computed Message-Authenticator is supported per packet", i)
+				return nil, fmt.Errorf("attrs[%d]: only one auto-computed Message-Authenticator is supported per packet", i)
 			}
 			maValOffset = off
 		}
 	}
 
-	pkt, _, err := buildRadiusPacket(secret, code, id, authenticator, attrs, false)
+	pkt, _, err := buildRadiusPacket(secret, code, id, authenticator, attrBytes, false)
 	if err != nil {
-		return fmt.Errorf("build packet: %w", err)
+		return nil, fmt.Errorf("build packet: %w", err)
 	}
 
 	// Compute the real Request Authenticator now that pkt holds the zeroed
@@ -334,6 +315,32 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 		mac.Write(pkt)
 		hash := mac.Sum(nil)
 		copy(pkt[absOffset:absOffset+16], hash)
+	}
+	return pkt, nil
+}
+
+// runPacketScenario builds a single RADIUS packet entirely from sc's
+// explicit code/id/authenticator/attrs fields (via buildPacketFromSpec)
+// and sends it, logging and checking the response against sc.Response.
+// This is the scenario type to reach for when testing how a server
+// handles a request missing something the normal encoder would always
+// include, e.g. Message-Authenticator: just leave any type-80 entry out
+// of attrs entirely.
+func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) error {
+	code, err := resolveRadiusCode(sc.Code)
+	if err != nil {
+		return err
+	}
+
+	var id *byte
+	if sc.ID != nil {
+		b := byte(*sc.ID)
+		id = &b
+	}
+
+	pkt, err := buildPacketFromSpec(secret, code, id, sc.Authenticator, sc.Attrs)
+	if err != nil {
+		return err
 	}
 	log.Printf("[packet] sending %d bytes: %x", len(pkt), pkt)
 

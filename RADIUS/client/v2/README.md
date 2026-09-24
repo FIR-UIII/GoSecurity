@@ -150,13 +150,129 @@ with something like "bad authenticator or shared secret"; give an explicit
 `authenticator:` hex value to opt back out and send an arbitrary one on
 purpose instead.
 
+**`type: fuzz`** — structural attribute fuzzer: takes the same seed-packet
+fields as `type: packet` (`code`/`id`/`authenticator`/`attrs`) and sends
+`iterations` mutated variants of it, round-robining through a registry of
+mutators:
+
+```yaml
+    code: Access-Request
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "art"
+      - type: User-Password
+        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+    iterations: 200            # required: how many mutated packets to send
+    # seed: 1234567890         # optional: fixed PRNG seed for a reproducible run
+                                # (omitted = random, logged at the start of the run)
+    # strategies: [length_mismatch, bit_flip]   # optional subset; default: all mutators
+    # healthcheck_every: 20    # optional: resend the unmutated seed every N
+                                # iterations to detect the server dying/hanging; default 20
+    # expect_no_accept: true   # optional: flag any mutated packet that still gets
+                                # Access-Accept back as a finding; default true
+```
+
+The seed packet must itself be one the server accepts (the fuzz scenario
+sends it unmutated as a health-check before fuzzing starts and rejects the
+whole scenario immediately if that fails) — build it the same way you
+would a `type: packet` scenario. Available mutators (registered in
+`fuzz.go`): `length_mismatch` (lies about an attribute's Length byte),
+`duplicate` (repeats one attribute), `missing_required` (drops one
+attribute), `oversized_value` (300 random bytes into one attribute's
+value), `empty_value`, `unknown_type` (retypes an attribute to a number
+outside the known dictionary), `bit_flip`, `truncate`, and
+`message_authenticator_tamper` (corrupts an existing Message-Authenticator
+so its HMAC no longer validates — a no-op if the seed has none).
+
+Each iteration is logged as one compact line (strategy + description +
+resulting response code); a finding (unexpected Access-Accept) or a
+network error also logs the full request/response hex so it can be
+copy-pasted into a `type: raw` regression scenario. A network error other
+than a timeout, or a failed health-check, aborts the run early and is
+treated as critical (the server likely crashed or is hanging) — this is
+the fuzzer's DoS/crash detector, distinct from findings (server alive but
+wrongly accepting a malformed request). The scenario itself fails (summary
+FAILED, non-zero exit) if there's at least one finding or the run was
+aborted early.
+
+**`type: challenge`** — stateful Access-Challenge/OTP fuzzer: sends the
+same `Code`/`ID`/`Authenticator`/`Attrs` fields as `type: packet` as a
+**first** Access-Request, which must get an Access-Challenge back (e.g.
+just `User-Name`), then brute-forces a numeric OTP against the returned
+`State` across up to `max_attempts` second requests:
+
+```yaml
+    attrs:
+      - type: User-Name
+        value: "art"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6           # optional; default = digit count of otp_max
+    max_attempts: 200        # required: hard safety cap on attempts sent
+    # otp_attr: User-Password   # optional; attribute carrying the guess, default User-Password
+    # otp_order: sequential     # optional: sequential | random; default sequential
+    # state_reuse: true         # optional: replay the ORIGINAL State every attempt; default true
+    # delay: 0s                 # optional pause between attempts
+    # state_checks: [bit_flip, truncate, foreign, drop]   # optional one-shot State-corruption probes, run once each after the loop
+```
+
+This checks two things: whether the server rate-limits/locks out repeated
+wrong-OTP attempts (the run logs a NOTICE the first time the response
+pattern — code + Reply-Message — changes partway through, which is the
+signature of a lockout kicking in), and — with the default
+`state_reuse: true` — whether a single `State` value stays valid/reusable
+across many wrong guesses rather than being invalidated after the first
+failure (a State that survives unlimited reuse is itself a finding worth
+noting, since it removes any friction from brute-forcing). `max_attempts`
+is mandatory precisely so a `type: challenge` scenario can never
+accidentally launch an unbounded brute force. If the OTP is actually
+guessed within the configured range, that's logged as a loud FINDING and
+fails the scenario (same "unexpected success" semantics `type: fuzz` uses
+for an unexpected Access-Accept); a dead/unreachable server aborts the run
+the same way. The optional `state_checks` run once each, after the main
+loop, with a single arbitrary OTP guess and a corrupted `State`
+(bit-flipped, truncated, replaced with random bytes, or omitted
+entirely), logging the full response for manual review — a corrupted
+State still producing Access-Accept is flagged as its own FINDING.
+
 See `client/v2/config.example.yaml` for complete working examples covering
-both scenario types, including a ready-to-run "no-message-authenticator"
+all four scenario types, including a ready-to-run "no-message-authenticator"
 `packet` example with a real, correctly PAP-encrypted password, a
 "status-with-message-authenticator" example covering the auto-computed
 Message-Authenticator, auto-computed accounting-style Request
-Authenticator, and NAS-IP-Address case, and a "truncated-authenticator"
-`raw` example demonstrating `response: Timeout`.
+Authenticator, and NAS-IP-Address case, a "truncated-authenticator"
+`raw` example demonstrating `response: Timeout`, a `fuzz` example
+running the default mutator set against the same valid "art"/"12345"
+seed packet, and a `challenge` example (illustrative — this repo's own
+FreeRADIUS test config doesn't actually run an OTP/challenge module, so
+it demonstrates the schema rather than a real brute force).
+
+## Fuzzing the decoder (`go test -fuzz`)
+
+Separate from the network-facing `type: fuzz` scenario above, the
+client's own RADIUS response decoder — `parseAttributes` (challenge.go)
+and `verifyMessageAuthenticator` (messageAuthenticator.go), both of which
+parse untrusted bytes that came off the network — has Go native
+coverage-guided fuzz targets in `decode_fuzz_test.go`:
+
+```bash
+go test -fuzz=FuzzParseAttributes -fuzztime=30s ./client/v2
+go test -fuzz=FuzzVerifyMessageAuthenticator -fuzztime=30s ./client/v2
+```
+
+These need no live server and no config file — they only assert the
+decoder never panics or hangs on arbitrary bytes (returning an error is
+the correct, expected outcome for malformed input). A crash found this
+way gets minimized and saved under `client/v2/testdata/fuzz/`, which then
+runs as a permanent regression test on every plain `go test ./client/v2`
+— no `-fuzz` flag needed for that. Two real crashes were found and fixed
+this way during development: `parseAttributes` slicing
+`rawPacket[20:totalLen]` without checking `totalLen >= 20` first, and
+`verifyMessageAuthenticator`'s own manual attribute walk reading one byte
+past the end of a response with a dangling trailing attribute — see
+`client/v2/testdata/fuzz/FuzzVerifyMessageAuthenticator/` for the saved
+regression case.
 
 ## Test server
 

@@ -52,6 +52,10 @@ func runScenario(cfg *Config, sc Scenario, addrOverride string) error {
 		return runRawScenario(r.Addr, r.Timeout, sc.PacketHex, sc.Response)
 	case "packet":
 		return runPacketScenario(r.Addr, r.Secret, r.Timeout, sc)
+	case "fuzz":
+		return runFuzzScenario(r.Addr, r.Secret, r.Timeout, sc)
+	case "challenge":
+		return runChallengeScenario(r.Addr, r.Secret, r.Timeout, sc)
 	default:
 		return fmt.Errorf("unknown scenario type %q", sc.Type)
 	}

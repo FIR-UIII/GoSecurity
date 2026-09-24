@@ -21,6 +21,9 @@ func parseAttributes(rawPacket []byte) ([]Attribute, error) {
 	}
 
 	totalLen := int(binary.BigEndian.Uint16(rawPacket[2:4]))
+	if totalLen < 20 {
+		return nil, fmt.Errorf("declared length %d is shorter than the RADIUS header", totalLen)
+	}
 	if len(rawPacket) < totalLen {
 		return nil, fmt.Errorf("buffer smaller than declared length")
 	}
