@@ -125,6 +125,38 @@ scenarios:
     healthcheck_every: 20
     # seed: 1234567890         # set this to reproduce a specific run exactly
     # strategies: [length_mismatch, bit_flip, truncate]   # omit for all mutators
+    # strategies:                            # or pin a strategy to a specific
+    #   - strategy: length_mismatch          # attribute instead of a random one
+    #     target: User-Password              # (must be present in attrs above)
+    #   - bit_flip                           # bare names still work, random target
+
+  # fuzz + marked_range: unlike the other mutators (which pick a random
+  # attribute each iteration), marked_range is targeted — write <FUZZ>
+  # anywhere inside an attrs[].value string and it substitutes a number
+  # from [from, to] there each time this strategy runs. NAS-Identifier
+  # here doesn't gate whether this test server accepts the request, so
+  # the unmutated seed (literally containing "test-nas-<FUZZ>", marker
+  # and all) still gets Accept for the health-check. If your <FUZZ>
+  # instead replaces something that DOES gate acceptance (e.g. the
+  # password itself), set baseline_response to whatever the literal,
+  # unsubstituted marker text actually produces (almost always Reject),
+  # not Accept — the health-check always builds its packet from attrs
+  # exactly as written, <FUZZ> included.
+  - name: "fuzz-marked-range-example"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "art"
+      - type: User-Password
+        value: "12345"
+      - type: NAS-Identifier
+        value: "test-nas-<FUZZ>"
+    iterations: 50
+    strategies: [marked_range]
+    from: 0
+    to: 999
+    healthcheck_every: 10
 
   # challenge: stateful Access-Challenge/OTP fuzzer. Sends the attrs below
   # as a FIRST Access-Request that must get an Access-Challenge back, then

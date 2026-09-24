@@ -68,12 +68,22 @@ type Scenario struct {
 	// applying one of Strategies (round-robin) each time. See fuzz.go for
 	// the mutator registry and runFuzzScenario for the finding/
 	// health-check logic.
-	Iterations       int      `yaml:"iterations"`        // required (> 0): number of mutated packets to send
-	Seed             *int64   `yaml:"seed"`              // optional PRNG seed for a reproducible run; random (and logged) if omitted
-	Strategies       []string `yaml:"strategies"`        // optional subset of mutator names; default: all registered mutators
-	HealthcheckEvery int      `yaml:"healthcheck_every"` // optional: resend the unmutated seed every N iterations to detect server death/hang; default 20
-	ExpectNoAccept   *bool    `yaml:"expect_no_accept"`  // optional: flag any mutated packet that gets Access-Accept as a finding; default true
-	BaselineResponse string   `yaml:"baseline_response"` // optional: the code the unmutated seed itself must get back for the health-check to pass; default Access-Accept. Set to e.g. "Challenge" for a server that always challenges a valid first request (OTP-only flow) — the unmutated seed there never gets a plain Accept, so the default would otherwise fail the health-check immediately. Cannot be "Timeout" (the health-check needs an actual response).
+	Iterations       int            `yaml:"iterations"`        // required (> 0): number of mutated packets to send
+	Seed             *int64         `yaml:"seed"`              // optional PRNG seed for a reproducible run; random (and logged) if omitted
+	Strategies       []StrategySpec `yaml:"strategies"`        // optional subset of mutator names, each optionally pinned to a target: attribute (see StrategySpec); default: all registered mutators, each with a random target
+	HealthcheckEvery int            `yaml:"healthcheck_every"` // optional: resend the unmutated seed every N iterations to detect server death/hang; default 20
+	ExpectNoAccept   *bool          `yaml:"expect_no_accept"`  // optional: flag any mutated packet that gets Access-Accept as a finding; default true
+	BaselineResponse string         `yaml:"baseline_response"` // optional: the code the unmutated seed itself must get back for the health-check to pass; default Access-Accept. Set to e.g. "Challenge" for a server that always challenges a valid first request (OTP-only flow) — the unmutated seed there never gets a plain Accept, so the default would otherwise fail the health-check immediately. Cannot be "Timeout" (the health-check needs an actual response).
+
+	// fuzz, marked_range strategy only: sweeps a value range into whichever
+	// attrs[].value contains the literal "<FUZZ>" marker (e.g.
+	// value: "<FUZZ>" or value: "user-<FUZZ>@example.com"), substituting a
+	// number from [From, To] each time this strategy runs (a no-op if
+	// unset, or if no attrs[] value has the marker). See mutateMarkedRange
+	// in fuzz.go.
+	From       *int `yaml:"from"`        // range start; From and To must both be set together
+	To         *int `yaml:"to"`          // range end (inclusive); must be >= From
+	FuzzDigits int  `yaml:"fuzz_digits"` // optional zero-padded width for the substituted number; default: no padding
 
 	// challenge: drives Code/ID/Authenticator/Attrs above as the FIRST
 	// Access-Request (must get an Access-Challenge back), then
@@ -97,6 +107,41 @@ type AttrSpec struct {
 	Type   string `yaml:"type"`   // numeric RADIUS type (0-255) or a known name (see dictionary.go)
 	Length *int   `yaml:"length"` // explicit Length byte override; omitted = 2+len(value) (with the same oversized-value wrap as appendAttr's default encoding)
 	Value  string `yaml:"value"`  // literal UTF-8 string, or hex:<hexstring>
+}
+
+// StrategySpec is one entry in a "fuzz" scenario's Strategies list. It
+// accepts two YAML forms:
+//
+//	strategies: [length_mismatch, bit_flip]         # bare name: no Target (random attribute, the original behavior)
+//	strategies:
+//	  - strategy: length_mismatch
+//	    target: User-Password                       # pin this strategy to a specific attribute
+//
+// Target is a numeric RADIUS type or a known name (see dictionary.go),
+// same as AttrSpec.Type. It's ignored by message_authenticator_tamper and
+// marked_range, which already locate their own attribute; every other
+// registered mutator uses it in place of picking a random attribute, and
+// config.go's validate() requires that attribute to actually be present
+// in the scenario's seed Attrs when Target is set.
+type StrategySpec struct {
+	Strategy string `yaml:"strategy"`
+	Target   string `yaml:"target"`
+}
+
+// UnmarshalYAML implements the two accepted forms described on
+// StrategySpec: a bare scalar name, or a {strategy, target} mapping.
+func (s *StrategySpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		s.Target = ""
+		return value.Decode(&s.Strategy)
+	}
+	type strategySpecAlias StrategySpec // avoid recursing back into this method
+	var aux strategySpecAlias
+	if err := value.Decode(&aux); err != nil {
+		return fmt.Errorf("strategies[]: must be a strategy name or a {strategy, target} mapping: %w", err)
+	}
+	*s = StrategySpec(aux)
+	return nil
 }
 
 // loadConfig reads and parses the YAML file at path.
@@ -162,9 +207,25 @@ func (c *Config) validate() error {
 			if sc.HealthcheckEvery < 0 {
 				return fmt.Errorf("scenario %s: healthcheck_every must be >= 0", label)
 			}
-			for _, s := range sc.Strategies {
-				if !isKnownFuzzStrategy(s) {
-					return fmt.Errorf("scenario %s: unknown fuzz strategy %q", label, s)
+			for i, s := range sc.Strategies {
+				if !isKnownFuzzStrategy(s.Strategy) {
+					return fmt.Errorf("scenario %s: unknown fuzz strategy %q", label, s.Strategy)
+				}
+				if s.Target != "" && isTargetableFuzzStrategy(s.Strategy) {
+					t, err := resolveAttrType(s.Target)
+					if err != nil {
+						return fmt.Errorf("scenario %s: strategies[%d]: target: %w", label, i, err)
+					}
+					found := false
+					for _, a := range sc.Attrs {
+						if at, aerr := resolveAttrType(a.Type); aerr == nil && at == t {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return fmt.Errorf("scenario %s: strategies[%d]: target %q not present in seed attrs", label, i, s.Target)
+					}
 				}
 			}
 			if sc.BaselineResponse != "" {
@@ -174,6 +235,15 @@ func (c *Config) validate() error {
 				if _, err := resolveExpectedResponse(sc.BaselineResponse); err != nil {
 					return fmt.Errorf("scenario %s: baseline_response: %w", label, err)
 				}
+			}
+			if (sc.From == nil) != (sc.To == nil) {
+				return fmt.Errorf("scenario %s: from and to must be set together", label)
+			}
+			if sc.From != nil && *sc.To < *sc.From {
+				return fmt.Errorf("scenario %s: to must be >= from", label)
+			}
+			if sc.FuzzDigits < 0 {
+				return fmt.Errorf("scenario %s: fuzz_digits must be >= 0", label)
 			}
 		case "challenge":
 			if len(sc.Attrs) == 0 {

@@ -50,7 +50,8 @@ scenarios:
         value: "123"
       - type: Message-Authenticator
     iterations: 100
-    strategies: [message_authenticator_tamper]
+    strategies: [length_mismatch]
+    target: User-Password
     healthcheck_every: 20
     baseline_response: Challenge
     # pair this with external timing measurements (e.g. wrap the run and

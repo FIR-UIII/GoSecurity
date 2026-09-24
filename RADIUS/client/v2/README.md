@@ -179,7 +179,9 @@ mutators:
     iterations: 200            # required: how many mutated packets to send
     # seed: 1234567890         # optional: fixed PRNG seed for a reproducible run
                                 # (omitted = random, logged at the start of the run)
-    # strategies: [length_mismatch, bit_flip]   # optional subset; default: all mutators
+    # strategies: [length_mismatch, bit_flip]   # optional subset; default: all mutators,
+                                                  # each targeting a random attribute (see
+                                                  # "Targeting a specific attribute" below)
     # healthcheck_every: 20    # optional: resend the unmutated seed every N
                                 # iterations to detect the server dying/hanging; default 20
     # expect_no_accept: true   # optional: flag any mutated packet that still gets
@@ -193,6 +195,9 @@ mutators:
                                    # immediately on a perfectly valid seed. Cannot
                                    # be Timeout. Independent of expect_no_accept
                                    # above, which is about MUTATED packets.
+    # from: 0                  # marked_range strategy only: numeric range to
+    # to: 999999                 # sweep into any attrs[].value containing "<FUZZ>"
+    # fuzz_digits: 6              # optional zero-padded width for the substituted number
 ```
 
 The seed packet must itself be one the server accepts — normally
@@ -205,9 +210,58 @@ same way you would a `type: packet` scenario. Available mutators (registered in
 `duplicate` (repeats one attribute), `missing_required` (drops one
 attribute), `oversized_value` (300 random bytes into one attribute's
 value), `empty_value`, `unknown_type` (retypes an attribute to a number
-outside the known dictionary), `bit_flip`, `truncate`, and
+outside the known dictionary), `bit_flip`, `truncate`,
 `message_authenticator_tamper` (corrupts an existing Message-Authenticator
-so its HMAC no longer validates — a no-op if the seed has none).
+so its HMAC no longer validates — a no-op if the seed has none), and
+`marked_range` (see below).
+
+Unlike the other mutators, which pick a random attribute each iteration,
+`marked_range` is *targeted*: write `<FUZZ>` (a literal token, same
+convention as ffuf/wfuzz) anywhere inside an `attrs[].value` string —
+either the whole value (`value: "<FUZZ>"`) or embedded in a larger one
+(`value: "user-<FUZZ>@example.com"`) — and set `from:`/`to:`. Each time
+this strategy runs, it substitutes a number drawn from `[from, to]`
+(zero-padded to `fuzz_digits` if set) into the first attribute carrying
+the marker. It's a no-op (attrs sent unchanged) if `from`/`to` aren't set,
+or if no attribute in the seed has the marker — so it's safe to leave in
+the default "all strategies" rotation even for a seed that isn't using
+it. A plain substitution into `User-Password` is PAP-encrypted
+automatically, same as any other plain (non-`hex:`) `User-Password`
+value. This is the tool to reach for when you want to aim a value sweep
+(a PIN, a numeric ID, anything bounded) at one specific field instead of
+leaving the target to the other mutators' random choice — it complements
+`type: challenge`'s OTP brute-force, which does the same kind of range
+sweep but specifically for the *second* request in an Access-Challenge
+flow; `marked_range` works on any single request, including the first.
+
+One caveat: the health-check always builds its packet from `attrs`
+exactly as written — `<FUZZ>` literal text included, never substituted.
+If the marker sits somewhere that doesn't affect whether the server
+accepts the request (a NAS-Identifier suffix, say), the default
+`baseline_response: Accept` still works fine. If it instead replaces
+something that *does* gate acceptance (e.g. the password itself), the
+unmutated seed will get whatever the literal, unsubstituted `<FUZZ>` text
+actually produces — almost always Reject — so set `baseline_response`
+accordingly instead of leaving it at the default.
+
+**Targeting a specific attribute.** Every mutator except
+`message_authenticator_tamper` and `marked_range` (both already locate
+their own attribute) normally picks a random attribute each time it
+runs. To pin one to a specific attribute instead, write a `strategies[]`
+entry as a mapping instead of a bare name:
+```yaml
+    strategies:
+      - strategy: length_mismatch
+        target: User-Password       # numeric type or known name, same as attrs[].type
+      - strategy: bit_flip
+        target: Message-Authenticator
+      - duplicate                    # bare name still works — random target, as before
+```
+`target:` must resolve to an attribute type that's actually present in
+the seed's `attrs` — `config.go`'s `validate()` checks this upfront and
+refuses the config otherwise, rather than silently no-op'ing at runtime.
+The two forms mix freely in the same `strategies:` list; a bare string is
+exactly equivalent to a mapping with no `target:`.
 
 Each iteration is logged as one compact line (strategy + description +
 resulting response code); a finding (unexpected Access-Accept) or a

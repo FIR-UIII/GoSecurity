@@ -6,24 +6,47 @@ import (
 	"log"
 	"math/rand"
 	"sort"
+	"strings"
 	"time"
 )
 
-// mutator takes a cloned attrs slice (safe to modify in place) and returns
-// the mutated result plus a short human-readable description of what it
-// did, for logging and findings. A mutator that has nothing to do against
-// this particular seed (e.g. message_authenticator_tamper against a seed
-// with no Message-Authenticator attribute) returns attrs unchanged and a
-// description saying so; runFuzzScenario still sends it (a no-op mutation
-// is itself a valid, if uninteresting, data point) rather than skipping
-// the iteration.
-type mutator func(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string)
+// fuzzMarkerToken marks the spot inside an attrs[].value string that the
+// marked_range strategy substitutes a generated value into — e.g.
+// value: "<FUZZ>" or value: "user-<FUZZ>@example.com". Modeled on the same
+// FUZZ keyword convention ffuf/wfuzz use.
+const fuzzMarkerToken = "<FUZZ>"
 
-// fuzzStrategies is the registry of structural attribute mutators for the
-// "fuzz" scenario type. Each targets a different class of parser bug per
-// the fuzzing methodology: length lies, duplicate/missing attributes,
-// oversized/empty/truncated values, unknown types, bit-level corruption,
-// and a tampered Message-Authenticator.
+// fuzzContext carries the per-run state and configuration every mutator
+// needs: rng is shared so a fixed seed: reproduces a whole run
+// deterministically; from/to/digits/hasRange configure marked_range (see
+// mutateMarkedRange) — every other mutator ignores them.
+type fuzzContext struct {
+	rng      *rand.Rand
+	hasRange bool
+	from, to int
+	digits   int
+}
+
+// mutator takes a cloned attrs slice (safe to modify in place) and a
+// target (an attribute type name/number from a strategies[] entry's
+// target:, or "" to fall back to picking a random attribute — the
+// original behavior). It returns the mutated result plus a short
+// human-readable description for logging and findings. A mutator that
+// has nothing to do against this particular seed/target (e.g.
+// message_authenticator_tamper against a seed with no Message-
+// Authenticator attribute, marked_range against a seed with no <FUZZ>
+// marker, or a target that doesn't resolve to any attribute) returns
+// attrs unchanged and a description saying so; runFuzzScenario still
+// sends it (a no-op mutation is itself a valid, if uninteresting, data
+// point) rather than skipping the iteration.
+type mutator func(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string)
+
+// fuzzStrategies is the registry of attribute mutators for the "fuzz"
+// scenario type. Each targets a different class of bug per the fuzzing
+// methodology: length lies, duplicate/missing attributes, oversized/
+// empty/truncated values, unknown types, bit-level corruption, a
+// tampered Message-Authenticator, and (marked_range) a targeted
+// value-range sweep of a specific, explicitly marked attribute.
 var fuzzStrategies = map[string]mutator{
 	"length_mismatch":              mutateLengthMismatch,
 	"duplicate":                    mutateDuplicate,
@@ -34,6 +57,25 @@ var fuzzStrategies = map[string]mutator{
 	"bit_flip":                     mutateBitFlip,
 	"truncate":                     mutateTruncate,
 	"message_authenticator_tamper": mutateMessageAuthenticatorTamper,
+	"marked_range":                 mutateMarkedRange,
+}
+
+// targetableFuzzStrategies is the subset of fuzzStrategies whose target:
+// is meaningful (picks which attribute the mutator acts on, instead of a
+// random one). message_authenticator_tamper and marked_range already
+// locate their own attribute (by type 80, and by the <FUZZ> marker,
+// respectively), so a target: on either of those is simply ignored —
+// config.go's validate() skips the "target must exist in seed" check for
+// them accordingly.
+var targetableFuzzStrategies = map[string]bool{
+	"length_mismatch":  true,
+	"duplicate":        true,
+	"missing_required": true,
+	"oversized_value":  true,
+	"empty_value":      true,
+	"unknown_type":     true,
+	"bit_flip":         true,
+	"truncate":         true,
 }
 
 // isKnownFuzzStrategy reports whether name is a registered mutator, used
@@ -41,6 +83,12 @@ var fuzzStrategies = map[string]mutator{
 func isKnownFuzzStrategy(name string) bool {
 	_, ok := fuzzStrategies[name]
 	return ok
+}
+
+// isTargetableFuzzStrategy reports whether name's target: is meaningful
+// (see targetableFuzzStrategies).
+func isTargetableFuzzStrategy(name string) bool {
+	return targetableFuzzStrategies[name]
 }
 
 // sortedFuzzStrategyNames returns every registered strategy name, sorted,
@@ -53,6 +101,32 @@ func sortedFuzzStrategyNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// targetIndex resolves which attrs[] index a mutator should act on: with
+// no target, a random index (the original, unchanged default behavior);
+// with a target, the first attribute whose resolved type matches it.
+// config.go's validate() already guarantees a match exists in the seed
+// for every targetable strategy that names one, so a missing match here
+// is defensive (e.g. attrs somehow differs from what was validated), not
+// the expected path.
+func targetIndex(rng *rand.Rand, attrs []AttrSpec, target string) (idx int, ok bool) {
+	if target == "" {
+		if len(attrs) == 0 {
+			return -1, false
+		}
+		return rng.Intn(len(attrs)), true
+	}
+	wantType, err := resolveAttrType(target)
+	if err != nil {
+		return -1, false
+	}
+	for i, a := range attrs {
+		if t, terr := resolveAttrType(a.Type); terr == nil && t == wantType {
+			return i, true
+		}
+	}
+	return -1, false
 }
 
 // cloneAttrs deep-copies attrs (including the *int Length pointer) so a
@@ -91,14 +165,14 @@ func hexValue(b []byte) string {
 // mutateLengthMismatch overrides one random attribute's Length byte to lie
 // about its actual encoded size (RFC 2865 §5 Type|Length|Value framing),
 // probing for buffer over/under-read in the server's TLV walker.
-func mutateLengthMismatch(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	if len(attrs) == 0 {
+func mutateLengthMismatch(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	i, ok := targetIndex(ctx.rng, attrs, target)
+	if !ok {
 		return attrs, "length_mismatch: no attrs to target"
 	}
-	i := rng.Intn(len(attrs))
 	actual := 2 + len(decodeAttrValue(attrs[i]))
 	deltas := []int{-actual + 1, -5, -2, -1, 1, 2, 5, 255 - actual}
-	delta := deltas[rng.Intn(len(deltas))]
+	delta := deltas[ctx.rng.Intn(len(deltas))]
 	newLen := actual + delta
 	if newLen < 0 {
 		newLen = 0
@@ -114,11 +188,11 @@ func mutateLengthMismatch(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string)
 // after the first, probing how the server handles a repeated attribute
 // type (some are legitimately repeatable, e.g. Reply-Message; others,
 // like User-Password, are not supposed to be).
-func mutateDuplicate(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	if len(attrs) == 0 {
+func mutateDuplicate(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	i, ok := targetIndex(ctx.rng, attrs, target)
+	if !ok {
 		return attrs, "duplicate: no attrs to target"
 	}
-	i := rng.Intn(len(attrs))
 	dup := attrs[i]
 	if dup.Length != nil {
 		l := *dup.Length
@@ -135,11 +209,11 @@ func mutateDuplicate(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
 // how the server handles a request missing something it needs (most
 // interesting when it happens to drop User-Name/User-Password, but any
 // attribute is worth dropping).
-func mutateMissingRequired(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	if len(attrs) == 0 {
+func mutateMissingRequired(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	i, ok := targetIndex(ctx.rng, attrs, target)
+	if !ok {
 		return attrs, "missing_required: no attrs to target"
 	}
-	i := rng.Intn(len(attrs))
 	removed := attrs[i]
 	out := make([]AttrSpec, 0, len(attrs)-1)
 	out = append(out, attrs[:i]...)
@@ -152,13 +226,13 @@ func mutateMissingRequired(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string
 // can hold (255 - 2-byte Type|Length header) — probing truncation/
 // overflow handling. appendAttr's own Length-byte wrap (see packet.go)
 // still applies on top of this when no explicit length: is set.
-func mutateOversizedValue(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	if len(attrs) == 0 {
+func mutateOversizedValue(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	i, ok := targetIndex(ctx.rng, attrs, target)
+	if !ok {
 		return attrs, "oversized_value: no attrs to target"
 	}
-	i := rng.Intn(len(attrs))
 	b := make([]byte, 300)
-	rng.Read(b)
+	ctx.rng.Read(b)
 	attrs[i].Value = hexValue(b)
 	attrs[i].Length = nil
 	return attrs, fmt.Sprintf("oversized_value: attrs[%d] (%s) -> %d random bytes", i, attrs[i].Type, len(b))
@@ -171,11 +245,11 @@ func mutateOversizedValue(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string)
 // which would otherwise auto-PAP-encrypt a bare "" into a 16-byte padded
 // block instead (see appendAttrSpec in packet.go) — the hex: prefix
 // always means "these exact raw bytes", bypassing that.
-func mutateEmptyValue(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	if len(attrs) == 0 {
+func mutateEmptyValue(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	i, ok := targetIndex(ctx.rng, attrs, target)
+	if !ok {
 		return attrs, "empty_value: no attrs to target"
 	}
-	i := rng.Intn(len(attrs))
 	attrs[i].Value = "hex:"
 	attrs[i].Length = nil
 	return attrs, fmt.Sprintf("empty_value: attrs[%d] (%s)", i, attrs[i].Type)
@@ -184,14 +258,14 @@ func mutateEmptyValue(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
 // mutateUnknownType changes one random attribute's Type to a numeric value
 // not present in the well-known dictionary (dictionary.go), probing how
 // the server handles an attribute it doesn't recognize.
-func mutateUnknownType(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	if len(attrs) == 0 {
+func mutateUnknownType(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	i, ok := targetIndex(ctx.rng, attrs, target)
+	if !ok {
 		return attrs, "unknown_type: no attrs to target"
 	}
-	i := rng.Intn(len(attrs))
 	var t byte
 	for {
-		t = byte(rng.Intn(256))
+		t = byte(ctx.rng.Intn(256))
 		if attrName(t) == "Unknown" {
 			break
 		}
@@ -205,20 +279,37 @@ func mutateUnknownType(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
 // raw value bytes, probing generic parser robustness against bit-level
 // corruption (the classic byte-fuzzing mutation, applied structurally so
 // framing stays otherwise valid).
-func mutateBitFlip(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
-	// Skip attrs with an empty value (nothing to flip); try a few times
-	// before giving up on this seed entirely.
+func mutateBitFlip(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	if target != "" {
+		i, ok := targetIndex(ctx.rng, attrs, target)
+		if !ok {
+			return attrs, "bit_flip: no attrs to target"
+		}
+		b := decodeAttrValue(attrs[i])
+		if len(b) == 0 {
+			return attrs, fmt.Sprintf("bit_flip: attrs[%d] (%s) has an empty value, nothing to flip", i, attrs[i].Type)
+		}
+		byteIdx := ctx.rng.Intn(len(b))
+		bitIdx := ctx.rng.Intn(8)
+		b[byteIdx] ^= 1 << bitIdx
+		attrs[i].Value = hexValue(b)
+		attrs[i].Length = nil
+		return attrs, fmt.Sprintf("bit_flip: attrs[%d] (%s) byte %d bit %d", i, attrs[i].Type, byteIdx, bitIdx)
+	}
+	// No target: keep the original random-with-retry behavior — try a
+	// few random attrs before giving up, since a randomly picked one
+	// might happen to have an empty value (nothing to flip).
 	for attempt := 0; attempt < 10; attempt++ {
 		if len(attrs) == 0 {
 			break
 		}
-		i := rng.Intn(len(attrs))
+		i := ctx.rng.Intn(len(attrs))
 		b := decodeAttrValue(attrs[i])
 		if len(b) == 0 {
 			continue
 		}
-		byteIdx := rng.Intn(len(b))
-		bitIdx := rng.Intn(8)
+		byteIdx := ctx.rng.Intn(len(b))
+		bitIdx := ctx.rng.Intn(8)
 		b[byteIdx] ^= 1 << bitIdx
 		attrs[i].Value = hexValue(b)
 		attrs[i].Length = nil
@@ -232,17 +323,31 @@ func mutateBitFlip(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
 // stays internally consistent — the interesting case here is the server's
 // own downstream parsing of a shorter-than-expected value, e.g. a
 // truncated User-Password block or NAS-IP-Address).
-func mutateTruncate(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
+func mutateTruncate(ctx *fuzzContext, attrs []AttrSpec, target string) ([]AttrSpec, string) {
+	if target != "" {
+		i, ok := targetIndex(ctx.rng, attrs, target)
+		if !ok {
+			return attrs, "truncate: no attrs to target"
+		}
+		b := decodeAttrValue(attrs[i])
+		if len(b) == 0 {
+			return attrs, fmt.Sprintf("truncate: attrs[%d] (%s) has an empty value, nothing to truncate", i, attrs[i].Type)
+		}
+		newLen := ctx.rng.Intn(len(b))
+		attrs[i].Value = hexValue(b[:newLen])
+		attrs[i].Length = nil
+		return attrs, fmt.Sprintf("truncate: attrs[%d] (%s) %d -> %d bytes", i, attrs[i].Type, len(b), newLen)
+	}
 	for attempt := 0; attempt < 10; attempt++ {
 		if len(attrs) == 0 {
 			break
 		}
-		i := rng.Intn(len(attrs))
+		i := ctx.rng.Intn(len(attrs))
 		b := decodeAttrValue(attrs[i])
 		if len(b) == 0 {
 			continue
 		}
-		newLen := rng.Intn(len(b))
+		newLen := ctx.rng.Intn(len(b))
 		attrs[i].Value = hexValue(b[:newLen])
 		attrs[i].Length = nil
 		return attrs, fmt.Sprintf("truncate: attrs[%d] (%s) %d -> %d bytes", i, attrs[i].Type, len(b), newLen)
@@ -256,19 +361,76 @@ func mutateTruncate(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
 // length. A no-op (attrs returned unchanged) if the seed has no type-80
 // entry — most seeds built for a server with
 // require_message_authenticator = no won't.
-func mutateMessageAuthenticatorTamper(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
+func mutateMessageAuthenticatorTamper(ctx *fuzzContext, attrs []AttrSpec, _ string) ([]AttrSpec, string) {
 	for i, a := range attrs {
 		t, err := resolveAttrType(a.Type)
 		if err != nil || t != 80 {
 			continue
 		}
 		b := make([]byte, 16)
-		rng.Read(b)
+		ctx.rng.Read(b)
 		attrs[i].Value = hexValue(b)
 		attrs[i].Length = nil
 		return attrs, fmt.Sprintf("message_authenticator_tamper: attrs[%d] -> random 16 bytes", i)
 	}
 	return attrs, "message_authenticator_tamper: no Message-Authenticator in seed"
+}
+
+// mutateMarkedRange targets the first attrs[] entry whose value contains
+// the literal fuzzMarkerToken ("<FUZZ>") and substitutes it with a number
+// drawn from [ctx.from, ctx.to] (inclusive), formatted as a plain decimal
+// string — zero-padded to ctx.digits if set. This is the targeted
+// counterpart to the other, randomly-targeted structural mutators: it
+// lets a scenario aim a value-range sweep (e.g. a numeric OTP/PIN space,
+// or any other bounded value) at one specific attribute instead of
+// leaving the target to chance. A plain (non-hex:) substitution into
+// User-Password is PAP-encrypted automatically, same as any other
+// plain User-Password value (see appendAttrSpec in packet.go).
+//
+// A no-op (attrs unchanged) if ctx has no configured range (from/to
+// unset) or the seed has no <FUZZ> marker in any attribute — same
+// no-op convention as mutateMessageAuthenticatorTamper, so this strategy
+// is safe to leave in the default "all strategies" rotation even for a
+// seed that isn't using it.
+func mutateMarkedRange(ctx *fuzzContext, attrs []AttrSpec, _ string) ([]AttrSpec, string) {
+	if !ctx.hasRange {
+		return attrs, "marked_range: no from/to range configured"
+	}
+	idx := -1
+	for i, a := range attrs {
+		if strings.Contains(a.Value, fuzzMarkerToken) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return attrs, "marked_range: no " + fuzzMarkerToken + " marker in seed"
+	}
+
+	span := ctx.to - ctx.from + 1
+	candidate := ctx.from + ctx.rng.Intn(span)
+	replacement := fmt.Sprintf("%d", candidate)
+	if ctx.digits > 0 {
+		replacement = fmt.Sprintf("%0*d", ctx.digits, candidate)
+	}
+
+	attrs[idx].Value = strings.ReplaceAll(attrs[idx].Value, fuzzMarkerToken, replacement)
+	attrs[idx].Length = nil
+	return attrs, fmt.Sprintf("marked_range: attrs[%d] (%s) %s -> %s", idx, attrs[idx].Type, fuzzMarkerToken, replacement)
+}
+
+// formatStrategies renders a []StrategySpec for the startup log line,
+// e.g. "length_mismatch(target=User-Password), bit_flip".
+func formatStrategies(specs []StrategySpec) string {
+	parts := make([]string, len(specs))
+	for i, s := range specs {
+		if s.Target == "" {
+			parts[i] = s.Strategy
+		} else {
+			parts[i] = fmt.Sprintf("%s(target=%s)", s.Strategy, s.Target)
+		}
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // runFuzzScenario mutates sc's seed packet (Code/ID/Authenticator/Attrs,
@@ -298,14 +460,22 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, sc Scenario) er
 
 	strategies := sc.Strategies
 	if len(strategies) == 0 {
-		strategies = sortedFuzzStrategyNames()
+		for _, name := range sortedFuzzStrategyNames() {
+			strategies = append(strategies, StrategySpec{Strategy: name})
+		}
 	}
 
 	seed := time.Now().UnixNano()
 	if sc.Seed != nil {
 		seed = *sc.Seed
 	}
-	rng := rand.New(rand.NewSource(seed))
+	ctx := &fuzzContext{rng: rand.New(rand.NewSource(seed))}
+	if sc.From != nil && sc.To != nil {
+		ctx.hasRange = true
+		ctx.from = *sc.From
+		ctx.to = *sc.To
+		ctx.digits = sc.FuzzDigits
+	}
 
 	// The health-check (initial, periodic, and final) requires the
 	// unmutated seed to keep getting this exact code back. Defaults to
@@ -321,8 +491,8 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, sc Scenario) er
 			return err
 		}
 	}
-	log.Printf("[fuzz] seed=%d iterations=%d strategies=%v baseline_response=%d (%s)",
-		seed, sc.Iterations, strategies, baselineCode, radiusCodeName(baselineCode))
+	log.Printf("[fuzz] seed=%d iterations=%d strategies=%s baseline_response=%d (%s)",
+		seed, sc.Iterations, formatStrategies(strategies), baselineCode, radiusCodeName(baselineCode))
 
 	healthcheckEvery := sc.HealthcheckEvery
 	if healthcheckEvery == 0 {
@@ -355,8 +525,9 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, sc Scenario) er
 	var findings int
 	ran := 0
 	for i := 0; i < sc.Iterations; i++ {
-		strategy := strategies[i%len(strategies)]
-		mutated, desc := fuzzStrategies[strategy](rng, cloneAttrs(sc.Attrs))
+		spec := strategies[i%len(strategies)]
+		strategy := spec.Strategy
+		mutated, desc := fuzzStrategies[spec.Strategy](ctx, cloneAttrs(sc.Attrs), spec.Target)
 
 		pkt, err := buildPacketFromSpec(secret, code, id, sc.Authenticator, mutated)
 		if err != nil {
