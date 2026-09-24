@@ -306,7 +306,23 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, sc Scenario) er
 		seed = *sc.Seed
 	}
 	rng := rand.New(rand.NewSource(seed))
-	log.Printf("[fuzz] seed=%d iterations=%d strategies=%v", seed, sc.Iterations, strategies)
+
+	// The health-check (initial, periodic, and final) requires the
+	// unmutated seed to keep getting this exact code back. Defaults to
+	// Access-Accept, but a server that always challenges a valid first
+	// request (OTP-only flow, no direct single-shot Accept) needs this
+	// set to Challenge — otherwise the health-check fails immediately on
+	// a perfectly valid seed. This is independent of expectNoAccept
+	// below, which is about MUTATED packets, not the seed.
+	baselineCode := byte(2)
+	if sc.BaselineResponse != "" {
+		baselineCode, err = resolveRadiusCode(sc.BaselineResponse)
+		if err != nil {
+			return err
+		}
+	}
+	log.Printf("[fuzz] seed=%d iterations=%d strategies=%v baseline_response=%d (%s)",
+		seed, sc.Iterations, strategies, baselineCode, radiusCodeName(baselineCode))
 
 	healthcheckEvery := sc.HealthcheckEvery
 	if healthcheckEvery == 0 {
@@ -322,12 +338,12 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, sc Scenario) er
 		if err != nil {
 			return fmt.Errorf("seed packet: %w", err)
 		}
-		if len(resp) == 0 || resp[0] != 2 {
+		if len(resp) == 0 || resp[0] != baselineCode {
 			got := "no response"
 			if len(resp) > 0 {
 				got = fmt.Sprintf("code %d (%s)", resp[0], radiusCodeName(resp[0]))
 			}
-			return fmt.Errorf("seed packet no longer accepted: got %s", got)
+			return fmt.Errorf("seed packet no longer accepted: expected code %d (%s), got %s", baselineCode, radiusCodeName(baselineCode), got)
 		}
 		return nil
 	}

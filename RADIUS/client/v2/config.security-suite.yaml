@@ -8,8 +8,8 @@
 # See client/v2/README.md for the full schema of each scenario type
 # (raw | packet | fuzz | challenge).
 
-addr: "debug.diam.rosatom.local:1812"
-secret: "sdnfasfaspfbaisbudfiabsdipbasipdbfip"
+addr: "localhost:1812"
+secret: "MyRadiusSecret123"
 timeout: 5s
 
 scenarios:
@@ -387,6 +387,14 @@ scenarios:
                              # across repeated wrong guesses (it shouldn't,
                              # ideally — that's exactly what this checks)
     state_checks: [bit_flip, truncate, foreign, drop]
+    timeout: 1s   # a wrong-OTP/corrupted-State attempt that gets silently
+                  # dropped (no reply) burns the full timeout before the
+                  # loop moves on; with 10 attempts + 4 state_checks at the
+                  # default 5s that's up to 70s — easily enough to run past
+                  # the real OTP's server-side validity window and make
+                  # later attempts fail for a reason unrelated to the test
+                  # itself. Raise this only if 1s is too tight for a normal
+                  # Reject round-trip on this server.
 
   - name: "never-issues-challenge-for-unknown-user"
     type: packet

@@ -73,6 +73,7 @@ type Scenario struct {
 	Strategies       []string `yaml:"strategies"`        // optional subset of mutator names; default: all registered mutators
 	HealthcheckEvery int      `yaml:"healthcheck_every"` // optional: resend the unmutated seed every N iterations to detect server death/hang; default 20
 	ExpectNoAccept   *bool    `yaml:"expect_no_accept"`  // optional: flag any mutated packet that gets Access-Accept as a finding; default true
+	BaselineResponse string   `yaml:"baseline_response"` // optional: the code the unmutated seed itself must get back for the health-check to pass; default Access-Accept. Set to e.g. "Challenge" for a server that always challenges a valid first request (OTP-only flow) — the unmutated seed there never gets a plain Accept, so the default would otherwise fail the health-check immediately. Cannot be "Timeout" (the health-check needs an actual response).
 
 	// challenge: drives Code/ID/Authenticator/Attrs above as the FIRST
 	// Access-Request (must get an Access-Challenge back), then
@@ -164,6 +165,14 @@ func (c *Config) validate() error {
 			for _, s := range sc.Strategies {
 				if !isKnownFuzzStrategy(s) {
 					return fmt.Errorf("scenario %s: unknown fuzz strategy %q", label, s)
+				}
+			}
+			if sc.BaselineResponse != "" {
+				if isTimeoutResponse(sc.BaselineResponse) {
+					return fmt.Errorf("scenario %s: baseline_response cannot be Timeout (the health-check needs an actual response code)", label)
+				}
+				if _, err := resolveExpectedResponse(sc.BaselineResponse); err != nil {
+					return fmt.Errorf("scenario %s: baseline_response: %w", label, err)
 				}
 			}
 		case "challenge":

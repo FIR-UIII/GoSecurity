@@ -184,12 +184,23 @@ mutators:
                                 # iterations to detect the server dying/hanging; default 20
     # expect_no_accept: true   # optional: flag any mutated packet that still gets
                                 # Access-Accept back as a finding; default true
+    # baseline_response: Accept   # optional: the code the UNMUTATED seed itself
+                                   # must get back for the health-check to pass;
+                                   # default Access-Accept. Set to Challenge for a
+                                   # server that always challenges a valid first
+                                   # request (OTP-only, no direct single-shot
+                                   # Accept) — otherwise the health-check fails
+                                   # immediately on a perfectly valid seed. Cannot
+                                   # be Timeout. Independent of expect_no_accept
+                                   # above, which is about MUTATED packets.
 ```
 
-The seed packet must itself be one the server accepts (the fuzz scenario
-sends it unmutated as a health-check before fuzzing starts and rejects the
-whole scenario immediately if that fails) — build it the same way you
-would a `type: packet` scenario. Available mutators (registered in
+The seed packet must itself be one the server accepts — normally
+Access-Accept, or whatever `baseline_response:` names instead — (the fuzz
+scenario sends it unmutated as a health-check before fuzzing starts, and
+again every `healthcheck_every` iterations and once at the end, rejecting
+the whole scenario immediately/early if that fails) — build the seed the
+same way you would a `type: packet` scenario. Available mutators (registered in
 `fuzz.go`): `length_mismatch` (lies about an attribute's Length byte),
 `duplicate` (repeats one attribute), `missing_required` (drops one
 attribute), `oversized_value` (300 random bytes into one attribute's
@@ -248,6 +259,17 @@ loop, with a single arbitrary OTP guess and a corrupted `State`
 (bit-flipped, truncated, replaced with random bytes, or omitted
 entirely), logging the full response for manual review — a corrupted
 State still producing Access-Accept is flagged as its own FINDING.
+
+If the server *silently drops* wrong/malformed attempts instead of
+replying with Access-Reject, each of those eats a full `timeout:` wait
+(5s by default) before the loop moves on — with a real OTP delivered
+out-of-band (app/email) and a short server-side validity window, a large
+`max_attempts` plus `state_checks` can add up to more wall-clock time than
+that window, so later attempts fail simply because the State/OTP expired
+mid-run rather than because of anything the attempt itself did. Set an
+explicit, shorter `timeout:` on the scenario (it's the same field `raw`/
+`packet`/`fuzz` use) — e.g. `timeout: 1s` — to keep the whole run well
+inside the OTP's validity window.
 
 See `client/v2/config.example.yaml` for complete working examples covering
 all four scenario types, including a ready-to-run "no-message-authenticator"
