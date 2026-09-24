@@ -1,0 +1,425 @@
+# Security test suite for a real target RADIUS server: plain PAP over
+# bare UDP (no RadSec/TLS), Message-Authenticator supported, and
+# Access-Challenge/OTP supported (OTP delivered out-of-band via app or
+# email). This is a DIFFERENT target than config.example.yaml's local
+# docker FreeRADIUS ("art"/"12345") — fill in the real addr/secret below,
+# and only run this against a server/account you're authorized to test.
+#
+# See client/v2/README.md for the full schema of each scenario type
+# (raw | packet | fuzz | challenge).
+
+addr: "CHANGEME:1812"     # target host:port
+secret: "CHANGEME"         # shared secret
+timeout: 5s
+
+scenarios:
+  # ============================================================
+  # 1. Baseline — confirms the seed credentials actually work before
+  #    trusting any of the negative/malformed scenarios below.
+  # ============================================================
+  - name: "simple-allow"
+    type: packet
+    code: Access-Request
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    response: Accept
+
+  - name: "wrong-password"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "not-the-real-password-999"
+      - type: Message-Authenticator
+    response: Reject
+
+  - name: "unknown-user"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "definitely-not-a-real-user-abcxyz"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    response: Reject   # also a user-enumeration check: diff this response
+                        # against wrong-password's in the log — if
+                        # Reply-Message/behavior differs between "wrong
+                        # user" and "wrong password", that's a side channel
+
+  - name: "empty-password"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: ""
+      - type: Message-Authenticator
+    response: Reject
+
+  - name: "missing-username"
+    type: packet
+    attrs:
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    response: Reject
+
+  # ============================================================
+  # 2. Message-Authenticator handling — this server explicitly supports
+  #    MA, so this is the highest-value area to probe.
+  # ============================================================
+  - name: "missing-message-authenticator"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      # no Message-Authenticator entry at all
+    response: Reject   # expected/desired: a server that supports MA
+                        # should require it rather than silently falling
+                        # back to accepting unauthenticated requests. If
+                        # this actually comes back Accept/Challenge,
+                        # that's a real finding — don't just flip this to
+                        # match reality without flagging it
+
+  - name: "wrong-message-authenticator"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+        value: "hex:00112233445566778899aabbccddeeff"   # garbage HMAC
+    response: Reject
+
+  - name: "duplicate-message-authenticator"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator        # first: correct, auto-computed
+      - type: Message-Authenticator        # second: garbage
+        value: "hex:00112233445566778899aabbccddeeff"
+    # no response: — purely observational: does the server key off the
+    # first MA it finds, the last, or reject outright on a duplicate
+    # attribute?
+
+  - name: "message-authenticator-not-last"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: Message-Authenticator          # auto-computed, placed early —
+                                              # RFC 2869 §5.14's HMAC covers
+                                              # the whole packet regardless
+                                              # of this attribute's position,
+                                              # so a correct server must
+                                              # still accept
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+    response: Accept
+
+  # ============================================================
+  # 3. Request Authenticator handling / replay
+  # ============================================================
+  - name: "replay-1"
+    type: packet
+    id: 111
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    response: Accept
+
+  - name: "replay-2-identical"
+    type: packet
+    id: 111
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    response: Accept
+    # run right after replay-1 and diff the two full response hex dumps in
+    # the log: identical bytes (including Response Authenticator) suggests
+    # a cached reply for a duplicate request (RFC 2865 §3's recommended
+    # behavior); a freshly-recomputed-but-equal response is also fine;
+    # anything else is worth a closer look
+
+  - name: "zero-authenticator"
+    type: packet
+    authenticator: "00000000000000000000000000000000"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    # no response: — observational; some servers reject an all-zero
+    # Authenticator outright, some don't care
+
+  - name: "ff-authenticator"
+    type: packet
+    authenticator: "ffffffffffffffffffffffffffffffff"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+
+  - name: "authenticator-reuse-different-password"
+    type: packet
+    authenticator: "000102030405060708090a0b0c0d0e0f"   # same Authenticator as simple-allow
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "totally-wrong-password"
+      - type: Message-Authenticator
+    response: Reject   # proves PAP decryption is actually re-run against
+                        # the real ciphertext each time, not short-circuited
+                        # by something keyed only on the Authenticator bytes
+
+  # ============================================================
+  # 4. Framing / malformed packets — byte-level parser robustness
+  # ============================================================
+  - name: "length-field-too-large"
+    type: raw
+    packet_hex: "0101006400000000000000000000000000000000"
+    response: Timeout   # header claims Length=100 but only 20 bytes were
+                         # actually sent; a well-behaved server should drop
+                         # this rather than read past the datagram
+
+  - name: "attribute-length-zero"
+    type: raw
+    packet_hex: "01020016000000000000000000000000000000000100"
+    response: Timeout
+
+  - name: "attribute-length-one"
+    type: raw
+    packet_hex: "01020016000000000000000000000000000000000101"
+    response: Timeout
+
+  - name: "attribute-length-overflow"
+    type: raw
+    packet_hex: "010300160000000000000000000000000000000001ff"
+    response: Timeout   # attribute claims a 253-byte value but none follows
+
+  - name: "short-header-19-bytes"
+    type: raw
+    packet_hex: "00000000000000000000000000000000000000"
+    response: Timeout
+
+  - name: "single-byte-datagram"
+    type: raw
+    packet_hex: "01"
+    response: Timeout
+    # NOTE: a genuine 0-byte UDP datagram can't be expressed here —
+    # packet_hex: "" is indistinguishable from "not set" by this tool's
+    # config validation. If you need that exact case, send it with a raw
+    # socket outside this tool.
+
+  - name: "unknown-code-200"
+    type: packet
+    code: 200
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    # no response: — this server is documented as only handling
+    # Access-Request/Accounting-Request; just observe what an unknown
+    # Code gets back (ideally: nothing — add response: Timeout once
+    # you've confirmed that's actually the server's behavior)
+
+  # ============================================================
+  # 5. User-Password / PAP encoding edge cases
+  # ============================================================
+  - name: "password-ciphertext-not-block-aligned"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "hex:0011223344"   # 5 bytes — RFC 2865 §5.2 requires a
+                                  # multiple of 16
+      - type: Message-Authenticator
+    response: Reject
+
+  - name: "password-multi-block"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "this-is-a-deliberately-long-wrong-password-over-16-bytes"
+      - type: Message-Authenticator
+    response: Reject   # exercises this tool's own multi-block PAP chaining
+                        # (encryptPAP in raw.go) as much as the server's
+
+  - name: "chap-and-user-password-both-present"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: CHAP-Password
+        value: "hex:0102030405060708090a0b0c0d0e0f10"
+      - type: Message-Authenticator
+    # no response: — this server is PAP-only; observe whether a stray
+    # CHAP-Password attribute is ignored (expected) or confuses it
+
+  # ============================================================
+  # 6. Structural attribute fuzzing (see fuzz.go for the mutator list)
+  # ============================================================
+  - name: "fuzz-full-suite"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 300
+    healthcheck_every: 30
+    # seed: 1234567890   # set this to reproduce a specific run exactly
+
+  - name: "fuzz-message-authenticator-only"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 100
+    strategies: [message_authenticator_tamper]
+    healthcheck_every: 20
+    # pair this with external timing measurements (e.g. wrap the run and
+    # log response latency per iteration) to check for a non-constant-time
+    # Message-Authenticator comparison on the server
+
+  # ============================================================
+  # 7. Access-Challenge / OTP flow — confirmed supported by this server.
+  #    The real OTP is delivered out-of-band (app/email) and can't be
+  #    scripted, so these scenarios deliberately do NOT try to guess it.
+  #    max_attempts is kept small ON PURPOSE: this hits a real external
+  #    delivery channel, and hammering it can lock out the real account
+  #    or spam its email/app with attempt notifications. Raise it only
+  #    within an authorized test window and only against an account you
+  #    control.
+  # ============================================================
+  - name: "otp-allow"
+    type: packet
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: Message-Authenticator
+    response: Challenge   # first factor accepted; server now wants the
+                           # OTP (State + Reply-Message + Prompt come back —
+                           # check the log for the real Reply-Message text)
+
+  - name: "otp-wrong-password-should-not-challenge"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "wrong-first-factor"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: Message-Authenticator
+    response: Reject   # a wrong first-factor password must not itself
+                        # trigger a Challenge — otherwise that's a second
+                        # enumeration side channel (this time on the first
+                        # factor rather than the username)
+
+  - name: "otp-state-and-lockout-probe"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    max_attempts: 10       # deliberately small — see the warning above
+    state_reuse: true       # tests whether the same State keeps working
+                             # across repeated wrong guesses (it shouldn't,
+                             # ideally — that's exactly what this checks)
+    state_checks: [bit_flip, truncate, foreign, drop]
+
+  - name: "never-issues-challenge-for-unknown-user"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "definitely-not-a-real-user-abcxyz"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: Message-Authenticator
+    response: Reject   # confirms Challenge is only issued for a real
+                        # username, not for anything shaped like a valid
+                        # request — symmetric to unknown-user above
