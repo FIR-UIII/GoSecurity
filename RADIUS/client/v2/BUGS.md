@@ -15,7 +15,7 @@ Attributes:
   type: Message-Authenticator, len: 18, value: 4237c75795be1f69f7f18bec70c06e62
 
 ===
-2) убрать 
+2) исправить 
       - type: User-Password
         value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
 

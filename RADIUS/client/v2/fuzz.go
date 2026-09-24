@@ -166,13 +166,17 @@ func mutateOversizedValue(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string)
 
 // mutateEmptyValue replaces one random attribute's value with zero bytes,
 // probing handling of an attribute with Length == 2 (Type|Length, no
-// Value at all).
+// Value at all). Uses an explicit "hex:" (rather than a bare "") so this
+// stays a truly empty attribute even when it lands on User-Password,
+// which would otherwise auto-PAP-encrypt a bare "" into a 16-byte padded
+// block instead (see appendAttrSpec in packet.go) — the hex: prefix
+// always means "these exact raw bytes", bypassing that.
 func mutateEmptyValue(rng *rand.Rand, attrs []AttrSpec) ([]AttrSpec, string) {
 	if len(attrs) == 0 {
 		return attrs, "empty_value: no attrs to target"
 	}
 	i := rng.Intn(len(attrs))
-	attrs[i].Value = ""
+	attrs[i].Value = "hex:"
 	attrs[i].Length = nil
 	return attrs, fmt.Sprintf("empty_value: attrs[%d] (%s)", i, attrs[i].Type)
 }

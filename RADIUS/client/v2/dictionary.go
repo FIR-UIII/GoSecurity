@@ -64,6 +64,7 @@ var attrNames = map[byte]string{
 	61: "NAS-Port-Type",
 	62: "Port-Limit",
 	63: "Login-LAT-Port",
+	76: "Prompt",
 	79: "EAP-Message",
 	80: "Message-Authenticator",
 	87: "NAS-Port-Id",

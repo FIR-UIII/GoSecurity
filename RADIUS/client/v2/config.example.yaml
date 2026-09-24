@@ -50,10 +50,13 @@ scenarios:
   # should be "no").
   #
   # This example is otherwise a genuinely valid Access-Request for
-  # user "art" / password "12345" (RFC 2865 PAP-encrypted against
-  # secret "MyRadiusSecret123" and the authenticator below) — just with
-  # the Message-Authenticator attribute left out entirely. Since no
-  # type: Message-Authenticator entry is in attrs, none gets appended.
+  # user "art" / password "12345" — just with the Message-Authenticator
+  # attribute left out entirely. Since no type: Message-Authenticator
+  # entry is in attrs, none gets appended. User-Password's plain value
+  # here is PAP-encrypted for you (RFC 2865 §5.2, against secret
+  # "MyRadiusSecret123" and the authenticator below) — write hex:<...>
+  # instead if you need to send an already-encrypted or deliberately
+  # wrong/unencrypted value by hand.
   - name: "no-message-authenticator"
     type: packet
     code: Access-Request
@@ -62,7 +65,7 @@ scenarios:
       - type: User-Name
         value: "art"
       - type: User-Password
-        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+        value: "12345"
       # length: N        # any attrs[] entry may also set an explicit
                           # length: to test a deliberately mismatched
                           # Length byte (omit for the normal 2+len(value))
@@ -117,7 +120,7 @@ scenarios:
       - type: User-Name
         value: "art"
       - type: User-Password
-        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+        value: "12345"
     iterations: 100
     healthcheck_every: 20
     # seed: 1234567890         # set this to reproduce a specific run exactly

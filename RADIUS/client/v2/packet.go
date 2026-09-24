@@ -199,10 +199,28 @@ func maybeEncodeIPv4(typ byte, raw string, val []byte) []byte {
 // since that's a legitimate thing to want full manual control over here.
 // Otherwise it falls back to appendAttr's default 2+len(value) encoding
 // (including its oversized-value wrap warning).
-func appendAttrSpec(attrs []byte, spec AttrSpec) ([]byte, int, error) {
+//
+// secret and authenticator are only needed for User-Password's
+// auto-PAP-encryption special case below; every other attribute ignores
+// them.
+func appendAttrSpec(attrs []byte, spec AttrSpec, secret string, authenticator []byte) ([]byte, int, error) {
 	typ, err := resolveAttrType(spec.Type)
 	if err != nil {
 		return nil, -1, err
+	}
+
+	// User-Password (type 2) with a plain (non-hex:) value and no
+	// explicit length: is PAP-encrypted for you (RFC 2865 §5.2, the same
+	// encryptPAP buildPAPPacket uses), keyed off this packet's own
+	// secret+authenticator — so a scenario can just write the plaintext
+	// password instead of precomputing and pasting in a hex: ciphertext
+	// by hand. A hex: value (raw bytes, sent exactly as given) or an
+	// explicit length: opts back out of this, same convention as
+	// Message-Authenticator below, for testing a deliberately wrong or
+	// unencrypted User-Password.
+	if typ == 2 && spec.Length == nil && !strings.HasPrefix(spec.Value, "hex:") {
+		enc := encryptPAP(spec.Value, secret, authenticator)
+		return appendAttr(attrs, typ, enc), -1, nil
 	}
 
 	// Message-Authenticator (type 80) with no explicit value or length:
@@ -276,7 +294,7 @@ func buildPacketFromSpec(secret string, code byte, id *byte, authenticatorHex st
 	maValOffset := -1 // offset within attrBytes of an auto Message-Authenticator's 16 zero bytes, or -1
 	for i, spec := range attrs {
 		var off int
-		attrBytes, off, err = appendAttrSpec(attrBytes, spec)
+		attrBytes, off, err = appendAttrSpec(attrBytes, spec, secret, authenticator)
 		if err != nil {
 			return nil, fmt.Errorf("attrs[%d]: %w", i, err)
 		}

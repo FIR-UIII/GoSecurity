@@ -110,7 +110,10 @@ attribute list. Nothing is added automatically beyond what you list in
         value: "art"                   # literal UTF-8 string, or hex:<hexstring>
         # length: 5                    # optional: override the encoded Length byte
       - type: User-Password
-        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+        value: "12345"                 # PAP-encrypted for you against this
+                                        # packet's secret+authenticator; use
+                                        # hex:<...> instead for an already-
+                                        # encrypted or deliberately wrong value
       - type: NAS-IP-Address
         value: 127.0.0.1               # dotted-quad text is auto-encoded as the
                                         # required 4 raw octets, not sent as ASCII text
@@ -124,9 +127,19 @@ a `type: Message-Authenticator` (or `80`) entry in `attrs`. If you *do* list
 one but leave both `value:` and `length:` unset, it's computed automatically.
 Giving it an explicit `value:` (e.g. `hex:...`) or `length:` opts back out of
 that and is sent exactly as written — useful for testing a deliberately
-wrong or malformed Message-Authenticator. The same applies to a
-PAP-encrypted `User-Password`: there's no automatic PAP encryption here, so
-supply it yourself via `hex:`. Any `attrs[]` entry can also set an explicit
+wrong or malformed Message-Authenticator.
+
+`User-Password` follows the same opt-in/opt-out convention: a plain
+(non-`hex:`) `value:` with no explicit `length:` is PAP-encrypted for you
+(RFC 2865 §5.2) against this packet's own secret and Request
+Authenticator — write the plaintext password and the tool computes the
+ciphertext, instead of precomputing and pasting in a `hex:` value by hand.
+Give it an explicit `hex:<...>` value or a `length:` to opt back out and
+send exact raw bytes instead — useful for testing an unencrypted,
+already-encrypted-against-something-else, or otherwise deliberately wrong
+`User-Password`.
+
+Any `attrs[]` entry can also set an explicit
 `length:` to send a deliberately mismatched Length byte — if the resulting
 2+len(value) exceeds 255, the Length byte deliberately wraps rather than
 erroring, since that's itself a valid thing to want to test.
@@ -162,7 +175,7 @@ mutators:
       - type: User-Name
         value: "art"
       - type: User-Password
-        value: "hex:c1ca81231bf609d1d3a7704f3ba549c3"
+        value: "12345"
     iterations: 200            # required: how many mutated packets to send
     # seed: 1234567890         # optional: fixed PRNG seed for a reproducible run
                                 # (omitted = random, logged at the start of the run)
