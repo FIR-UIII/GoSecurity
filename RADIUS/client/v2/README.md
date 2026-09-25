@@ -1,9 +1,10 @@
 # RADIUS client v2
 
-A RADIUS test client for appsec testing. Every exchange is logged to
-stdout/stderr: raw packet bytes (hex) in both directions, and a
-human-readable dump of the parsed attribute list received from the server,
-e.g.:
+A RADIUS test client for appsec testing. Every exchange logs the raw packet
+bytes (hex) sent and received. Pass `-v` to also get a human-readable dump
+of the parsed attribute list received from the server (for `packet`, `raw`,
+and `challenge` scenarios — see "Verbose parsed-response dumps (`-v`)"
+below), e.g.:
 
 ```
 2026/09/23 13:05:02 [packet] response 38 bytes: 03ca002666afa67932210cc79e07e98ad608c09150129f138c890217d41ed6eb005cba3034ea
@@ -24,8 +25,23 @@ go run ./client/v2 -addr localhost:1812 -secret MyRadiusSecret123 -user art -pas
 
 Only `pap` (single Access-Request) is implemented on this path. The `-mode`
 flag's usage text also lists `eap-md5` — a pre-existing unimplemented stub
-on the `-mode` path (hitting it panics) and out of scope here. Real `raw`
-and `packet` testing is done through the scenario config below instead.
+on the `-mode` path — and out of scope here. An unimplemented/unknown
+`-mode` (including the `eap-md5` default, so running the binary with no
+flags at all hits this) prints an error and a usage example to stderr and
+exits non-zero, rather than panicking. Real `raw` and `packet` testing is
+done through the scenario config below instead.
+
+## Verbose parsed-response dumps (`-v`)
+
+By default, `packet`/`raw`/`challenge` scenarios only log the raw
+sent/received packet bytes (hex) plus the pass/fail outcome — not the full
+human-readable "parsed response" attribute dump. Pass `-v` to also print
+that dump: `[packet] parsed response:`/`[raw] parsed response:`/
+`[challenge] parsed first response:`, as shown above. `fuzz` is unaffected
+either way — its per-iteration log line is already a compact one-liner
+(strategy + description + response code), and it separately always logs
+full request/response hex for a finding or a network error, regardless of
+`-v`.
 
 ## Scenario config (`-c` / `-config`)
 
@@ -195,9 +211,9 @@ mutators:
                                    # immediately on a perfectly valid seed. Cannot
                                    # be Timeout. Independent of expect_no_accept
                                    # above, which is about MUTATED packets.
-    # from: 0                  # marked_range strategy only: numeric range to
-    # to: 999999                 # sweep into any attrs[].value containing "<FUZZ>"
-    # fuzz_digits: 6              # optional zero-padded width for the substituted number
+    # fuzzlist: /path/to/list.txt   # marked_range strategy only: file with one
+                                     # substitution value per line, to sweep into
+                                     # any attrs[].value containing "<FUZZ>"
 ```
 
 The seed packet must itself be one the server accepts — normally
@@ -219,20 +235,30 @@ Unlike the other mutators, which pick a random attribute each iteration,
 `marked_range` is *targeted*: write `<FUZZ>` (a literal token, same
 convention as ffuf/wfuzz) anywhere inside an `attrs[].value` string —
 either the whole value (`value: "<FUZZ>"`) or embedded in a larger one
-(`value: "user-<FUZZ>@example.com"`) — and set `from:`/`to:`. Each time
-this strategy runs, it substitutes a number drawn from `[from, to]`
-(zero-padded to `fuzz_digits` if set) into the first attribute carrying
-the marker. It's a no-op (attrs sent unchanged) if `from`/`to` aren't set,
-or if no attribute in the seed has the marker — so it's safe to leave in
-the default "all strategies" rotation even for a seed that isn't using
-it. A plain substitution into `User-Password` is PAP-encrypted
-automatically, same as any other plain (non-`hex:`) `User-Password`
-value. This is the tool to reach for when you want to aim a value sweep
-(a PIN, a numeric ID, anything bounded) at one specific field instead of
-leaving the target to the other mutators' random choice — it complements
-`type: challenge`'s OTP brute-force, which does the same kind of range
-sweep but specifically for the *second* request in an Access-Challenge
-flow; `marked_range` works on any single request, including the first.
+(`value: "user-<FUZZ>@example.com"`) — and set `fuzzlist:` to a file with
+one substitution value per line, e.g.:
+```
+'or
+/xx
+<script>
+```
+Each time this strategy runs, it substitutes the next line from that file
+into the first attribute carrying the marker — e.g. with
+`value: "<FUZZ>654491"` and the list above, the first mutated iteration
+sends `value: "'or654491"`, the next `/xx654491"`, and so on, cycling back
+to the first line once the list is exhausted. It's a no-op (attrs sent
+unchanged) if `fuzzlist` isn't set, or if no attribute in the seed has the
+marker — so it's safe to leave in the default "all strategies" rotation
+even for a seed that isn't using it. A plain substitution into
+`User-Password` is PAP-encrypted automatically, same as any other plain
+(non-`hex:`) `User-Password` value. This is the tool to reach for when you
+want to aim a payload sweep (SQLi/XSS/path-traversal strings, a wordlist,
+anything read from a file) at one specific field instead of leaving the
+target to the other mutators' random choice — it complements
+`type: challenge`'s OTP brute-force, which does the same kind of
+sequential sweep but specifically for the *second* request in an
+Access-Challenge flow; `marked_range` works on any single request,
+including the first.
 
 One caveat: the health-check always builds its packet from `attrs`
 exactly as written — `<FUZZ>` literal text included, never substituted.

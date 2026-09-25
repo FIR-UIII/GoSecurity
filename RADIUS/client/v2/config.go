@@ -75,15 +75,13 @@ type Scenario struct {
 	ExpectNoAccept   *bool          `yaml:"expect_no_accept"`  // optional: flag any mutated packet that gets Access-Accept as a finding; default true
 	BaselineResponse string         `yaml:"baseline_response"` // optional: the code the unmutated seed itself must get back for the health-check to pass; default Access-Accept. Set to e.g. "Challenge" for a server that always challenges a valid first request (OTP-only flow) — the unmutated seed there never gets a plain Accept, so the default would otherwise fail the health-check immediately. Cannot be "Timeout" (the health-check needs an actual response).
 
-	// fuzz, marked_range strategy only: sweeps a value range into whichever
-	// attrs[].value contains the literal "<FUZZ>" marker (e.g.
-	// value: "<FUZZ>" or value: "user-<FUZZ>@example.com"), substituting a
-	// number from [From, To] each time this strategy runs (a no-op if
-	// unset, or if no attrs[] value has the marker). See mutateMarkedRange
-	// in fuzz.go.
-	From       *int `yaml:"from"`        // range start; From and To must both be set together
-	To         *int `yaml:"to"`          // range end (inclusive); must be >= From
-	FuzzDigits int  `yaml:"fuzz_digits"` // optional zero-padded width for the substituted number; default: no padding
+	// fuzz, marked_range strategy only: sweeps values read from a file into
+	// whichever attrs[].value contains the literal "<FUZZ>" marker (e.g.
+	// value: "<FUZZ>" or value: "user-<FUZZ>@example.com"), substituting the
+	// next line from FuzzList each time this strategy runs — cycling back to
+	// the first line once the list is exhausted (a no-op if unset, or if no
+	// attrs[] value has the marker). See mutateMarkedRange in fuzz.go.
+	FuzzList string `yaml:"fuzzlist"` // path to a file with one substitution value per line
 
 	// challenge: drives Code/ID/Authenticator/Attrs above as the FIRST
 	// Access-Request (must get an Access-Challenge back), then
@@ -236,14 +234,10 @@ func (c *Config) validate() error {
 					return fmt.Errorf("scenario %s: baseline_response: %w", label, err)
 				}
 			}
-			if (sc.From == nil) != (sc.To == nil) {
-				return fmt.Errorf("scenario %s: from and to must be set together", label)
-			}
-			if sc.From != nil && *sc.To < *sc.From {
-				return fmt.Errorf("scenario %s: to must be >= from", label)
-			}
-			if sc.FuzzDigits < 0 {
-				return fmt.Errorf("scenario %s: fuzz_digits must be >= 0", label)
+			if sc.FuzzList != "" {
+				if _, err := os.Stat(sc.FuzzList); err != nil {
+					return fmt.Errorf("scenario %s: fuzzlist: %w", label, err)
+				}
 			}
 		case "challenge":
 			if len(sc.Attrs) == 0 {

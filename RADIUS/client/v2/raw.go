@@ -49,7 +49,7 @@ func runRawScenario(addr string, timeout time.Duration, packetHex, expectedRespo
 
 	if attrs, perr := parseAttributes(resp); perr != nil {
 		log.Printf("[raw] response did not parse as well-formed RADIUS attributes: %v", perr)
-	} else {
+	} else if verbose {
 		log.Printf("[raw] parsed response:\n%s", formatParsedResponse(resp, attrs))
 	}
 

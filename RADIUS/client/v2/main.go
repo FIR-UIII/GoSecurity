@@ -2,9 +2,17 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"time"
 )
+
+// verbose controls whether the full human-readable "parsed response" dump
+// (formatParsedResponse) is printed for packet/raw/challenge scenarios; set
+// via -v. Every other log line (raw hex sent/received, per-iteration fuzz
+// results, findings, summaries) is unaffected and always printed.
+var verbose bool
 
 func main() {
 	addr := flag.String("addr", "localhost:1812", "RADIUS server address")
@@ -14,6 +22,7 @@ func main() {
 	mode := flag.String("mode", "eap-md5", "test mode: pap | eap-md5")
 	configPath := flag.String("c", "", "path to YAML scenario config; when set, runs scenarios instead of -mode")
 	flag.StringVar(configPath, "config", "", "alias for -c")
+	flag.BoolVar(&verbose, "v", false, "verbose: print full parsed-response dumps for packet/raw/challenge scenarios")
 
 	flag.Parse()
 
@@ -49,6 +58,12 @@ func main() {
 			log.Fatalf("PAP exchange failed: %v", err)
 		}
 	default:
-		panic("unknown mode: " + *mode)
+		fmt.Fprintf(os.Stderr, "error: unknown -mode %q (only \"pap\" is implemented; -mode's default, \"eap-md5\", is an unimplemented stub)\n\n", *mode)
+		fmt.Fprintln(os.Stderr, "usage:")
+		fmt.Fprintln(os.Stderr, "  client.exe -mode pap -addr localhost:1812 -secret MySecret -user art -pass 12345")
+		fmt.Fprintln(os.Stderr, "  client.exe -c client/v2/config.example.yaml")
+		fmt.Fprintln(os.Stderr, "\nflags:")
+		flag.PrintDefaults()
+		os.Exit(2)
 	}
 }

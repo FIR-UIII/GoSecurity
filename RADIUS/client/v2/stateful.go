@@ -171,7 +171,9 @@ func runChallengeScenario(addr, secret string, timeout time.Duration, sc Scenari
 	if err != nil {
 		return fmt.Errorf("first response did not parse as well-formed RADIUS attributes: %w", err)
 	}
-	log.Printf("[challenge] parsed first response:\n%s", formatParsedResponse(firstResp, firstAttrs))
+	if verbose {
+		log.Printf("[challenge] parsed first response:\n%s", formatParsedResponse(firstResp, firstAttrs))
+	}
 
 	if len(firstResp) == 0 || firstResp[0] != 11 {
 		got := byte(0)

@@ -132,8 +132,9 @@ scenarios:
 
   # fuzz + marked_range: unlike the other mutators (which pick a random
   # attribute each iteration), marked_range is targeted — write <FUZZ>
-  # anywhere inside an attrs[].value string and it substitutes a number
-  # from [from, to] there each time this strategy runs. NAS-Identifier
+  # anywhere inside an attrs[].value string and it substitutes the next
+  # line read from fuzzlist there each time this strategy runs (cycling
+  # back to the first line once the list is exhausted). NAS-Identifier
   # here doesn't gate whether this test server accepts the request, so
   # the unmutated seed (literally containing "test-nas-<FUZZ>", marker
   # and all) still gets Accept for the health-check. If your <FUZZ>
@@ -154,8 +155,7 @@ scenarios:
         value: "test-nas-<FUZZ>"
     iterations: 50
     strategies: [marked_range]
-    from: 0
-    to: 999
+    fuzzlist: client/v2/testdata/marked_range.txt
     healthcheck_every: 10
 
   # challenge: stateful Access-Challenge/OTP fuzzer. Sends the attrs below

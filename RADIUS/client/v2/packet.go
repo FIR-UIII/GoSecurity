@@ -374,7 +374,7 @@ func runPacketScenario(addr, secret string, timeout time.Duration, sc Scenario) 
 
 	if parsed, perr := parseAttributes(resp); perr != nil {
 		log.Printf("[packet] response did not parse as well-formed RADIUS attributes: %v", perr)
-	} else {
+	} else if verbose {
 		log.Printf("[packet] parsed response:\n%s", formatParsedResponse(resp, parsed))
 	}
 

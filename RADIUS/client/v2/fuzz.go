@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -18,13 +19,12 @@ const fuzzMarkerToken = "<FUZZ>"
 
 // fuzzContext carries the per-run state and configuration every mutator
 // needs: rng is shared so a fixed seed: reproduces a whole run
-// deterministically; from/to/digits/hasRange configure marked_range (see
+// deterministically; fuzzList/fuzzListIdx configure marked_range (see
 // mutateMarkedRange) — every other mutator ignores them.
 type fuzzContext struct {
-	rng      *rand.Rand
-	hasRange bool
-	from, to int
-	digits   int
+	rng         *rand.Rand
+	fuzzList    []string
+	fuzzListIdx int
 }
 
 // mutator takes a cloned attrs slice (safe to modify in place) and a
@@ -377,24 +377,25 @@ func mutateMessageAuthenticatorTamper(ctx *fuzzContext, attrs []AttrSpec, _ stri
 }
 
 // mutateMarkedRange targets the first attrs[] entry whose value contains
-// the literal fuzzMarkerToken ("<FUZZ>") and substitutes it with a number
-// drawn from [ctx.from, ctx.to] (inclusive), formatted as a plain decimal
-// string — zero-padded to ctx.digits if set. This is the targeted
-// counterpart to the other, randomly-targeted structural mutators: it
-// lets a scenario aim a value-range sweep (e.g. a numeric OTP/PIN space,
-// or any other bounded value) at one specific attribute instead of
-// leaving the target to chance. A plain (non-hex:) substitution into
-// User-Password is PAP-encrypted automatically, same as any other
-// plain User-Password value (see appendAttrSpec in packet.go).
+// the literal fuzzMarkerToken ("<FUZZ>") and substitutes it with the next
+// line from ctx.fuzzList (read from the scenario's fuzzlist: file),
+// advancing ctx.fuzzListIdx and cycling back to the first line once the
+// list is exhausted. This is the targeted counterpart to the other,
+// randomly-targeted structural mutators: it lets a scenario aim a payload
+// sweep (SQLi/XSS/path-traversal strings, a wordlist, anything read from a
+// file) at one specific attribute instead of leaving the target to chance.
+// A plain (non-hex:) substitution into User-Password is PAP-encrypted
+// automatically, same as any other plain User-Password value (see
+// appendAttrSpec in packet.go).
 //
-// A no-op (attrs unchanged) if ctx has no configured range (from/to
-// unset) or the seed has no <FUZZ> marker in any attribute — same
-// no-op convention as mutateMessageAuthenticatorTamper, so this strategy
-// is safe to leave in the default "all strategies" rotation even for a
-// seed that isn't using it.
+// A no-op (attrs unchanged) if ctx has no fuzzlist loaded (fuzzlist: unset)
+// or the seed has no <FUZZ> marker in any attribute — same no-op
+// convention as mutateMessageAuthenticatorTamper, so this strategy is safe
+// to leave in the default "all strategies" rotation even for a seed that
+// isn't using it.
 func mutateMarkedRange(ctx *fuzzContext, attrs []AttrSpec, _ string) ([]AttrSpec, string) {
-	if !ctx.hasRange {
-		return attrs, "marked_range: no from/to range configured"
+	if len(ctx.fuzzList) == 0 {
+		return attrs, "marked_range: no fuzzlist configured"
 	}
 	idx := -1
 	for i, a := range attrs {
@@ -407,16 +408,36 @@ func mutateMarkedRange(ctx *fuzzContext, attrs []AttrSpec, _ string) ([]AttrSpec
 		return attrs, "marked_range: no " + fuzzMarkerToken + " marker in seed"
 	}
 
-	span := ctx.to - ctx.from + 1
-	candidate := ctx.from + ctx.rng.Intn(span)
-	replacement := fmt.Sprintf("%d", candidate)
-	if ctx.digits > 0 {
-		replacement = fmt.Sprintf("%0*d", ctx.digits, candidate)
-	}
+	replacement := ctx.fuzzList[ctx.fuzzListIdx%len(ctx.fuzzList)]
+	ctx.fuzzListIdx++
 
 	attrs[idx].Value = strings.ReplaceAll(attrs[idx].Value, fuzzMarkerToken, replacement)
 	attrs[idx].Length = nil
 	return attrs, fmt.Sprintf("marked_range: attrs[%d] (%s) %s -> %s", idx, attrs[idx].Type, fuzzMarkerToken, replacement)
+}
+
+// loadFuzzList reads path (marked_range's fuzzlist:) and returns its
+// non-empty lines (CRLF/LF both handled, blank lines skipped), in file
+// order — mutateMarkedRange cycles through them in that order, one per
+// call, so the Nth marked_range mutation in a run uses the Nth line (mod
+// list length).
+func loadFuzzList(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("%s: no non-empty lines", path)
+	}
+	return lines, nil
 }
 
 // formatStrategies renders a []StrategySpec for the startup log line,
@@ -470,11 +491,12 @@ func runFuzzScenario(addr, secret string, timeout time.Duration, sc Scenario) er
 		seed = *sc.Seed
 	}
 	ctx := &fuzzContext{rng: rand.New(rand.NewSource(seed))}
-	if sc.From != nil && sc.To != nil {
-		ctx.hasRange = true
-		ctx.from = *sc.From
-		ctx.to = *sc.To
-		ctx.digits = sc.FuzzDigits
+	if sc.FuzzList != "" {
+		list, err := loadFuzzList(sc.FuzzList)
+		if err != nil {
+			return fmt.Errorf("load fuzzlist: %w", err)
+		}
+		ctx.fuzzList = list
 	}
 
 	// The health-check (initial, periodic, and final) requires the
