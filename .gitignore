@@ -1,1 +1,6 @@
 RADIUS/client/v2/config.yaml
+RADIUS/client/v2/config.packet.yaml
+RADIUS/client/v2/config.fuzz.yaml
+RADIUS/client/v2/hexpass.py
+RADIUS/client.exe
+RADIUS/client/v2/config.raw.yaml

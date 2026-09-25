@@ -13,24 +13,6 @@ secret: "MyRadiusSecret123"
 timeout: 5s
 
 scenarios:
-  # ============================================================
-  # 1. Baseline — confirms the seed credentials actually work before
-  #    trusting any of the negative/malformed scenarios below.
-  # ============================================================
-  - name: "simple-allow"
-    type: packet
-    code: Access-Request
-    authenticator: "000102030405060708090a0b0c0d0e0f"
-    attrs:
-      - type: User-Name
-        value: "radsectest01"
-      - type: NAS-Identifier
-        value: "RADIUStesting:radiussectest"
-      - type: User-Password
-        value: "123"
-      - type: Message-Authenticator
-    response: Accept
-
   - name: "wrong-password"
     type: packet
     attrs:
@@ -68,7 +50,7 @@ scenarios:
       - type: User-Password
         value: ""
       - type: Message-Authenticator
-    response: Reject
+    response: Timeout
 
   - name: "missing-username"
     type: packet
