@@ -1,0 +1,6485 @@
+# ============================================================================
+# config.new.yaml — RADIUS methodology: structural fuzzing (type: fuzz) +
+# Access-Challenge/OTP fuzzing (type: challenge).
+#
+# Target assumptions (fill in real addr/secret before running):
+#   - PAP only. No CHAP/EAP/MS-CHAP support expected from the server.
+#   - Two supported auth flows:
+#       Flow A ("separate OTP"): first Access-Request carries only the
+#         user's password in User-Password -> server replies
+#         Access-Challenge -> second Access-Request carries just the OTP
+#         (State echoed back) -> Access-Accept/Reject.
+#       Flow B ("concatenated"): a single Access-Request carries
+#         password+OTP concatenated in one User-Password value, e.g.
+#         password "123" + OTP "123456" => User-Password value "123123456".
+#         There is no second round-trip in this flow, so OTP fuzzing here
+#         is done as ordinary attribute/value fuzzing (type: fuzz /
+#         marked_range), NOT type: challenge (which assumes a real second
+#         request against a State).
+#
+# This is a template/methodology file — only run against a server/account
+# you are authorized to test. See client/v2/README.md for the full schema
+# of each scenario type (raw | packet | fuzz | challenge).
+# ============================================================================
+
+addr: "localhost:1812"
+secret: "MyRadiusSecret123"
+timeout: 5s
+
+scenarios:
+  # ==========================================================================
+  # PART 1 — type: fuzz
+  # ==========================================================================
+
+  # --------------------------------------------------------------------
+  # 1.1 Header Code sweep, 0-255 (`type: packet`, one request per code).
+  #     `type: fuzz`'s mutators never touch the header Code byte, so a
+  #     full 0-255 sweep of it has to be done with plain `packet`
+  #     scenarios instead - this is the exhaustive complement to the
+  #     mutator-driven fuzzing below. Only 1 (Access-Request), 11
+  #     (Access-Challenge-as-request, invalid direction), 12/13
+  #     (Status-Server/Client) are meaningful RADIUS request codes;
+  #     everything else (including reserved/unassigned values and
+  #     response-only codes like 2/3/5 sent AS a request) should, per
+  #     RFC 2865 SS4.1, either be silently dropped or rejected - never
+  #     answered as if it were a normal Access-Request. No response:
+  #     assertion is set here on purpose (behavior varies by
+  #     implementation and isn't nailed down by the RFC for the
+  #     unassigned range) - diff the logged responses across the sweep
+  #     for any code that unexpectedly returns Access-Accept.
+  # --------------------------------------------------------------------
+  - name: "code-sweep-000"
+    type: packet
+    code: 0
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-001"
+    type: packet
+    code: 1  # normal Access-Request - baseline
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-002"
+    type: packet
+    code: 2  # response-only code sent AS a request - should not be processed as one
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-003"
+    type: packet
+    code: 3  # response-only code sent AS a request - should not be processed as one
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-004"
+    type: packet
+    code: 4  # Accounting-Request - no User-Password in real accounting traffic
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-005"
+    type: packet
+    code: 5  # response-only code sent AS a request - should not be processed as one
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-006"
+    type: packet
+    code: 6
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-007"
+    type: packet
+    code: 7
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-008"
+    type: packet
+    code: 8
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-009"
+    type: packet
+    code: 9
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-010"
+    type: packet
+    code: 10
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-011"
+    type: packet
+    code: 11  # response-only code sent AS a request - should not be processed as one
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-012"
+    type: packet
+    code: 12  # Status-Server / Status-Client
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-013"
+    type: packet
+    code: 13  # Status-Server / Status-Client
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-014"
+    type: packet
+    code: 14
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-015"
+    type: packet
+    code: 15
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-016"
+    type: packet
+    code: 16
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-017"
+    type: packet
+    code: 17
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-018"
+    type: packet
+    code: 18
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-019"
+    type: packet
+    code: 19
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-020"
+    type: packet
+    code: 20
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-021"
+    type: packet
+    code: 21
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-022"
+    type: packet
+    code: 22
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-023"
+    type: packet
+    code: 23
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-024"
+    type: packet
+    code: 24
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-025"
+    type: packet
+    code: 25
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-026"
+    type: packet
+    code: 26
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-027"
+    type: packet
+    code: 27
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-028"
+    type: packet
+    code: 28
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-029"
+    type: packet
+    code: 29
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-030"
+    type: packet
+    code: 30
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-031"
+    type: packet
+    code: 31
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-032"
+    type: packet
+    code: 32
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-033"
+    type: packet
+    code: 33
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-034"
+    type: packet
+    code: 34
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-035"
+    type: packet
+    code: 35
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-036"
+    type: packet
+    code: 36
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-037"
+    type: packet
+    code: 37
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-038"
+    type: packet
+    code: 38
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-039"
+    type: packet
+    code: 39
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-040"
+    type: packet
+    code: 40
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-041"
+    type: packet
+    code: 41
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-042"
+    type: packet
+    code: 42
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-043"
+    type: packet
+    code: 43
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-044"
+    type: packet
+    code: 44
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-045"
+    type: packet
+    code: 45
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-046"
+    type: packet
+    code: 46
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-047"
+    type: packet
+    code: 47
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-048"
+    type: packet
+    code: 48
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-049"
+    type: packet
+    code: 49
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-050"
+    type: packet
+    code: 50
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-051"
+    type: packet
+    code: 51
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-052"
+    type: packet
+    code: 52
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-053"
+    type: packet
+    code: 53
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-054"
+    type: packet
+    code: 54
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-055"
+    type: packet
+    code: 55
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-056"
+    type: packet
+    code: 56
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-057"
+    type: packet
+    code: 57
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-058"
+    type: packet
+    code: 58
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-059"
+    type: packet
+    code: 59
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-060"
+    type: packet
+    code: 60
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-061"
+    type: packet
+    code: 61
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-062"
+    type: packet
+    code: 62
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-063"
+    type: packet
+    code: 63
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-064"
+    type: packet
+    code: 64
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-065"
+    type: packet
+    code: 65
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-066"
+    type: packet
+    code: 66
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-067"
+    type: packet
+    code: 67
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-068"
+    type: packet
+    code: 68
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-069"
+    type: packet
+    code: 69
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-070"
+    type: packet
+    code: 70
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-071"
+    type: packet
+    code: 71
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-072"
+    type: packet
+    code: 72
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-073"
+    type: packet
+    code: 73
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-074"
+    type: packet
+    code: 74
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-075"
+    type: packet
+    code: 75
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-076"
+    type: packet
+    code: 76
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-077"
+    type: packet
+    code: 77
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-078"
+    type: packet
+    code: 78
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-079"
+    type: packet
+    code: 79
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-080"
+    type: packet
+    code: 80
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-081"
+    type: packet
+    code: 81
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-082"
+    type: packet
+    code: 82
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-083"
+    type: packet
+    code: 83
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-084"
+    type: packet
+    code: 84
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-085"
+    type: packet
+    code: 85
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-086"
+    type: packet
+    code: 86
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-087"
+    type: packet
+    code: 87
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-088"
+    type: packet
+    code: 88
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-089"
+    type: packet
+    code: 89
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-090"
+    type: packet
+    code: 90
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-091"
+    type: packet
+    code: 91
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-092"
+    type: packet
+    code: 92
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-093"
+    type: packet
+    code: 93
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-094"
+    type: packet
+    code: 94
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-095"
+    type: packet
+    code: 95
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-096"
+    type: packet
+    code: 96
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-097"
+    type: packet
+    code: 97
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-098"
+    type: packet
+    code: 98
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-099"
+    type: packet
+    code: 99
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-100"
+    type: packet
+    code: 100
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-101"
+    type: packet
+    code: 101
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-102"
+    type: packet
+    code: 102
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-103"
+    type: packet
+    code: 103
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-104"
+    type: packet
+    code: 104
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-105"
+    type: packet
+    code: 105
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-106"
+    type: packet
+    code: 106
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-107"
+    type: packet
+    code: 107
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-108"
+    type: packet
+    code: 108
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-109"
+    type: packet
+    code: 109
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-110"
+    type: packet
+    code: 110
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-111"
+    type: packet
+    code: 111
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-112"
+    type: packet
+    code: 112
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-113"
+    type: packet
+    code: 113
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-114"
+    type: packet
+    code: 114
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-115"
+    type: packet
+    code: 115
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-116"
+    type: packet
+    code: 116
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-117"
+    type: packet
+    code: 117
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-118"
+    type: packet
+    code: 118
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-119"
+    type: packet
+    code: 119
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-120"
+    type: packet
+    code: 120
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-121"
+    type: packet
+    code: 121
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-122"
+    type: packet
+    code: 122
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-123"
+    type: packet
+    code: 123
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-124"
+    type: packet
+    code: 124
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-125"
+    type: packet
+    code: 125
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-126"
+    type: packet
+    code: 126
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-127"
+    type: packet
+    code: 127
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-128"
+    type: packet
+    code: 128
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-129"
+    type: packet
+    code: 129
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-130"
+    type: packet
+    code: 130
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-131"
+    type: packet
+    code: 131
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-132"
+    type: packet
+    code: 132
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-133"
+    type: packet
+    code: 133
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-134"
+    type: packet
+    code: 134
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-135"
+    type: packet
+    code: 135
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-136"
+    type: packet
+    code: 136
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-137"
+    type: packet
+    code: 137
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-138"
+    type: packet
+    code: 138
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-139"
+    type: packet
+    code: 139
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-140"
+    type: packet
+    code: 140
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-141"
+    type: packet
+    code: 141
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-142"
+    type: packet
+    code: 142
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-143"
+    type: packet
+    code: 143
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-144"
+    type: packet
+    code: 144
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-145"
+    type: packet
+    code: 145
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-146"
+    type: packet
+    code: 146
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-147"
+    type: packet
+    code: 147
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-148"
+    type: packet
+    code: 148
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-149"
+    type: packet
+    code: 149
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-150"
+    type: packet
+    code: 150
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-151"
+    type: packet
+    code: 151
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-152"
+    type: packet
+    code: 152
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-153"
+    type: packet
+    code: 153
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-154"
+    type: packet
+    code: 154
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-155"
+    type: packet
+    code: 155
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-156"
+    type: packet
+    code: 156
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-157"
+    type: packet
+    code: 157
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-158"
+    type: packet
+    code: 158
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-159"
+    type: packet
+    code: 159
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-160"
+    type: packet
+    code: 160
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-161"
+    type: packet
+    code: 161
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-162"
+    type: packet
+    code: 162
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-163"
+    type: packet
+    code: 163
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-164"
+    type: packet
+    code: 164
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-165"
+    type: packet
+    code: 165
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-166"
+    type: packet
+    code: 166
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-167"
+    type: packet
+    code: 167
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-168"
+    type: packet
+    code: 168
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-169"
+    type: packet
+    code: 169
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-170"
+    type: packet
+    code: 170
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-171"
+    type: packet
+    code: 171
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-172"
+    type: packet
+    code: 172
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-173"
+    type: packet
+    code: 173
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-174"
+    type: packet
+    code: 174
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-175"
+    type: packet
+    code: 175
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-176"
+    type: packet
+    code: 176
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-177"
+    type: packet
+    code: 177
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-178"
+    type: packet
+    code: 178
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-179"
+    type: packet
+    code: 179
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-180"
+    type: packet
+    code: 180
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-181"
+    type: packet
+    code: 181
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-182"
+    type: packet
+    code: 182
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-183"
+    type: packet
+    code: 183
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-184"
+    type: packet
+    code: 184
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-185"
+    type: packet
+    code: 185
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-186"
+    type: packet
+    code: 186
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-187"
+    type: packet
+    code: 187
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-188"
+    type: packet
+    code: 188
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-189"
+    type: packet
+    code: 189
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-190"
+    type: packet
+    code: 190
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-191"
+    type: packet
+    code: 191
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-192"
+    type: packet
+    code: 192
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-193"
+    type: packet
+    code: 193
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-194"
+    type: packet
+    code: 194
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-195"
+    type: packet
+    code: 195
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-196"
+    type: packet
+    code: 196
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-197"
+    type: packet
+    code: 197
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-198"
+    type: packet
+    code: 198
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-199"
+    type: packet
+    code: 199
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-200"
+    type: packet
+    code: 200
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-201"
+    type: packet
+    code: 201
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-202"
+    type: packet
+    code: 202
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-203"
+    type: packet
+    code: 203
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-204"
+    type: packet
+    code: 204
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-205"
+    type: packet
+    code: 205
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-206"
+    type: packet
+    code: 206
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-207"
+    type: packet
+    code: 207
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-208"
+    type: packet
+    code: 208
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-209"
+    type: packet
+    code: 209
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-210"
+    type: packet
+    code: 210
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-211"
+    type: packet
+    code: 211
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-212"
+    type: packet
+    code: 212
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-213"
+    type: packet
+    code: 213
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-214"
+    type: packet
+    code: 214
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-215"
+    type: packet
+    code: 215
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-216"
+    type: packet
+    code: 216
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-217"
+    type: packet
+    code: 217
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-218"
+    type: packet
+    code: 218
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-219"
+    type: packet
+    code: 219
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-220"
+    type: packet
+    code: 220
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-221"
+    type: packet
+    code: 221
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-222"
+    type: packet
+    code: 222
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-223"
+    type: packet
+    code: 223
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-224"
+    type: packet
+    code: 224
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-225"
+    type: packet
+    code: 225
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-226"
+    type: packet
+    code: 226
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-227"
+    type: packet
+    code: 227
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-228"
+    type: packet
+    code: 228
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-229"
+    type: packet
+    code: 229
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-230"
+    type: packet
+    code: 230
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-231"
+    type: packet
+    code: 231
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-232"
+    type: packet
+    code: 232
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-233"
+    type: packet
+    code: 233
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-234"
+    type: packet
+    code: 234
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-235"
+    type: packet
+    code: 235
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-236"
+    type: packet
+    code: 236
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-237"
+    type: packet
+    code: 237
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-238"
+    type: packet
+    code: 238
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-239"
+    type: packet
+    code: 239
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-240"
+    type: packet
+    code: 240
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-241"
+    type: packet
+    code: 241
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-242"
+    type: packet
+    code: 242
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-243"
+    type: packet
+    code: 243
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-244"
+    type: packet
+    code: 244
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-245"
+    type: packet
+    code: 245
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-246"
+    type: packet
+    code: 246
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-247"
+    type: packet
+    code: 247
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-248"
+    type: packet
+    code: 248
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-249"
+    type: packet
+    code: 249
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-250"
+    type: packet
+    code: 250
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-251"
+    type: packet
+    code: 251
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-252"
+    type: packet
+    code: 252
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-253"
+    type: packet
+    code: 253
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-254"
+    type: packet
+    code: 254
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  - name: "code-sweep-255"
+    type: packet
+    code: 255
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+  # --------------------------------------------------------------------
+  # 1.2 Attribute-type sweep, 0-255 (`type: packet`, one extra attribute
+  #     per iteration). Complements the code sweep above: exercises how
+  #     the parser handles every possible attribute type octet,
+  #     including gaps/reserved values not in this tool's own
+  #     dictionary.go (parsed as "unknown type N" on both sides). The
+  #     extra attribute's value is always an explicit hex: literal
+  #     ("FUZZ" ASCII, 46555a5a) so it never triggers a type-specific
+  #     encoding path (IPv4 auto-encode, PAP encryption, auto-computed
+  #     Message-Authenticator) - keeps every iteration structurally
+  #     identical except for the type octet itself. Types 1/2/80 in this
+  #     sweep double as a cheap duplicate-attribute check (a second
+  #     User-Name / User-Password / Message-Authenticator, with an
+  #     unrelated raw value) alongside the dedicated duplicate scenarios
+  #     in 1.3.
+  # --------------------------------------------------------------------
+  - name: "attr-type-sweep-000"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 0
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-001"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 1
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-002"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 2
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-003"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 3
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-004"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 4
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-005"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 5
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-006"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 6
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-007"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 7
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-008"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 8
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-009"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 9
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-010"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 10
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-011"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 11
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-012"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 12
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-013"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 13
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-014"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 14
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-015"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 15
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-016"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 16
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-017"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 17
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-018"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 18
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-019"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 19
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-020"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 20
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-021"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 21
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-022"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 22
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-023"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 23
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-024"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 24
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-025"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 25
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-026"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 26
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-027"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 27
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-028"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 28
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-029"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 29
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-030"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 30
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-031"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 31
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-032"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 32
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-033"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 33
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-034"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 34
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-035"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 35
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-036"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 36
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-037"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 37
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-038"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 38
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-039"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 39
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-040"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 40
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-041"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 41
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-042"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 42
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-043"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 43
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-044"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 44
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-045"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 45
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-046"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 46
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-047"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 47
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-048"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 48
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-049"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 49
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-050"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 50
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-051"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 51
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-052"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 52
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-053"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 53
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-054"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 54
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-055"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 55
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-056"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 56
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-057"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 57
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-058"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 58
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-059"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 59
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-060"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 60
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-061"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 61
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-062"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 62
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-063"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 63
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-064"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 64
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-065"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 65
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-066"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 66
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-067"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 67
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-068"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 68
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-069"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 69
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-070"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 70
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-071"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 71
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-072"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 72
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-073"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 73
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-074"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 74
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-075"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 75
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-076"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 76
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-077"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 77
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-078"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 78
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-079"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 79
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-080"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 80
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-081"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 81
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-082"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 82
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-083"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 83
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-084"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 84
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-085"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 85
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-086"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 86
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-087"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 87
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-088"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 88
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-089"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 89
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-090"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 90
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-091"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 91
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-092"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 92
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-093"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 93
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-094"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 94
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-095"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 95
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-096"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 96
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-097"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 97
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-098"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 98
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-099"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 99
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-100"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 100
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-101"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 101
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-102"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 102
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-103"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 103
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-104"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 104
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-105"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 105
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-106"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 106
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-107"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 107
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-108"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 108
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-109"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 109
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-110"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 110
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-111"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 111
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-112"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 112
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-113"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 113
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-114"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 114
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-115"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 115
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-116"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 116
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-117"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 117
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-118"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 118
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-119"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 119
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-120"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 120
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-121"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 121
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-122"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 122
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-123"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 123
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-124"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 124
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-125"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 125
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-126"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 126
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-127"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 127
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-128"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 128
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-129"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 129
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-130"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 130
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-131"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 131
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-132"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 132
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-133"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 133
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-134"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 134
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-135"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 135
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-136"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 136
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-137"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 137
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-138"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 138
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-139"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 139
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-140"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 140
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-141"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 141
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-142"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 142
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-143"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 143
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-144"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 144
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-145"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 145
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-146"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 146
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-147"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 147
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-148"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 148
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-149"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 149
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-150"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 150
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-151"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 151
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-152"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 152
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-153"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 153
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-154"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 154
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-155"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 155
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-156"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 156
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-157"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 157
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-158"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 158
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-159"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 159
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-160"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 160
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-161"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 161
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-162"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 162
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-163"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 163
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-164"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 164
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-165"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 165
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-166"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 166
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-167"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 167
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-168"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 168
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-169"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 169
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-170"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 170
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-171"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 171
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-172"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 172
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-173"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 173
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-174"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 174
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-175"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 175
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-176"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 176
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-177"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 177
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-178"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 178
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-179"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 179
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-180"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 180
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-181"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 181
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-182"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 182
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-183"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 183
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-184"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 184
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-185"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 185
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-186"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 186
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-187"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 187
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-188"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 188
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-189"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 189
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-190"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 190
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-191"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 191
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-192"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 192
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-193"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 193
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-194"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 194
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-195"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 195
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-196"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 196
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-197"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 197
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-198"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 198
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-199"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 199
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-200"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 200
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-201"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 201
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-202"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 202
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-203"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 203
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-204"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 204
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-205"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 205
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-206"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 206
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-207"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 207
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-208"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 208
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-209"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 209
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-210"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 210
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-211"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 211
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-212"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 212
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-213"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 213
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-214"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 214
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-215"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 215
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-216"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 216
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-217"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 217
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-218"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 218
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-219"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 219
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-220"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 220
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-221"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 221
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-222"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 222
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-223"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 223
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-224"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 224
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-225"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 225
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-226"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 226
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-227"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 227
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-228"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 228
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-229"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 229
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-230"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 230
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-231"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 231
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-232"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 232
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-233"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 233
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-234"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 234
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-235"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 235
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-236"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 236
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-237"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 237
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-238"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 238
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-239"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 239
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-240"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 240
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-241"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 241
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-242"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 242
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-243"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 243
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-244"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 244
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-245"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 245
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-246"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 246
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-247"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 247
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-248"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 248
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-249"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 249
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-250"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 250
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-251"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 251
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-252"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 252
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-253"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 253
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-254"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 254
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  - name: "attr-type-sweep-255"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: 255
+        value: "hex:46555a5a"
+      - type: Message-Authenticator
+  # --------------------------------------------------------------------
+  # 1.3 Duplicate-attribute scenarios - explicit, hand-picked cases
+  #     (beyond the incidental 1/2/80 coverage in 1.2 above).
+  # --------------------------------------------------------------------
+
+  - name: "duplicate-user-name-same-value"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    # no response: - observational: does the server use the first
+    # User-Name, the last, concatenate them, or reject outright?
+
+  - name: "duplicate-user-name-different-values"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Name
+        value: "definitely-not-a-real-user-abcxyz"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    # no response: - if the server authenticates against whichever
+    # User-Name it picks, this also probes a request-smuggling-style
+    # confusion between "the name it checked" and "the name it logs"
+
+  - name: "duplicate-user-password-different-values"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: User-Password
+        value: "totally-wrong-password"
+      - type: Message-Authenticator
+    # no response: - each User-Password is independently PAP-encrypted
+    # against the same Authenticator by this tool; observe which one
+    # (first/last/either) the server actually checks
+
+  - name: "duplicate-nas-identifier"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: NAS-Identifier
+        value: "some-other-nas"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    response: Accept   # NAS-Identifier duplication shouldn't affect auth
+                        # outcome at all if the server is well-behaved
+
+  - name: "many-duplicates-same-attribute"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "dup-2"
+      - type: NAS-Identifier
+        value: "dup-3"
+      - type: NAS-Identifier
+        value: "dup-4"
+      - type: NAS-Identifier
+        value: "dup-5"
+      - type: NAS-Identifier
+        value: "dup-6"
+      - type: NAS-Identifier
+        value: "dup-7"
+      - type: NAS-Identifier
+        value: "dup-8"
+      - type: Message-Authenticator
+    # no response: - looks for O(n^2)/allocation issues or a crash when
+    # one attribute type appears many times in a single packet
+
+  - name: "fuzz-duplicate-strategy-flow-a"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 100
+    strategies:
+      - strategy: duplicate
+        target: User-Name
+      - strategy: duplicate
+        target: NAS-Identifier
+      - strategy: duplicate
+        target: User-Password
+      - strategy: duplicate
+        target: Message-Authenticator
+    baseline_response: Challenge   # this server always challenges a valid
+                                    # first request (Flow A) rather than
+                                    # single-shot accepting
+
+  # --------------------------------------------------------------------
+  # 1.4 Structural mutation fuzzing, default mutator rotation, against
+  #     both supported flows.
+  # --------------------------------------------------------------------
+
+  - name: "fuzz-default-mutators-flow-a"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 500
+    # strategies omitted - full default rotation: length_mismatch,
+    # duplicate, missing_required, oversized_value, empty_value,
+    # unknown_type, bit_flip, truncate, message_authenticator_tamper,
+    # marked_range (no-op here, no <FUZZ> marker present)
+    baseline_response: Challenge
+    healthcheck_every: 20
+    expect_no_accept: true
+
+  - name: "fuzz-default-mutators-flow-b-concatenated"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123123456"        # password "123" + OTP "123456" concatenated
+      - type: Message-Authenticator
+    iterations: 500
+    baseline_response: Accept     # Flow B is single-shot: a valid
+                                   # password+OTP concatenation should
+                                   # Accept directly, no Challenge
+    healthcheck_every: 20
+    expect_no_accept: true
+
+  - name: "fuzz-targeted-message-authenticator-flow-a"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 100
+    strategies:
+      - strategy: message_authenticator_tamper
+      - strategy: bit_flip
+        target: Message-Authenticator
+      - strategy: truncate
+        target: Message-Authenticator
+      - strategy: length_mismatch
+        target: Message-Authenticator
+    baseline_response: Challenge
+
+  - name: "fuzz-targeted-user-password-flow-a"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 200
+    strategies:
+      - strategy: length_mismatch
+        target: User-Password
+      - strategy: bit_flip
+        target: User-Password
+      - strategy: truncate
+        target: User-Password
+      - strategy: oversized_value
+        target: User-Password
+      - strategy: empty_value
+        target: User-Password
+    baseline_response: Challenge   # a corrupted ciphertext should always
+                                    # come back Reject, never Accept/Challenge
+
+  - name: "fuzz-targeted-user-password-flow-b"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123123456"
+      - type: Message-Authenticator
+    iterations: 200
+    strategies:
+      - strategy: length_mismatch
+        target: User-Password
+      - strategy: bit_flip
+        target: User-Password
+      - strategy: truncate
+        target: User-Password
+      - strategy: oversized_value
+        target: User-Password
+      - strategy: empty_value
+        target: User-Password
+    baseline_response: Accept
+
+  - name: "fuzz-vendor-specific-attribute"
+    type: fuzz
+    authenticator: "000102030405060708090a0b0c0d0e0f"
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Vendor-Specific
+        value: "hex:0000000900110c0104036172740000"   # arbitrary vendor-id/type/data
+      - type: Message-Authenticator
+    iterations: 150
+    strategies:
+      - strategy: length_mismatch
+        target: Vendor-Specific
+      - strategy: bit_flip
+        target: Vendor-Specific
+      - strategy: truncate
+        target: Vendor-Specific
+      - strategy: oversized_value
+        target: Vendor-Specific
+      - strategy: empty_value
+        target: Vendor-Specific
+    baseline_response: Challenge   # a garbage/unknown Vendor-Specific
+                                    # attribute must not itself break
+                                    # normal PAP auth
+
+  # --------------------------------------------------------------------
+  # 1.5 marked_range payload sweeps (SQLi / command injection / path
+  #     traversal / XSS / format-string / overflow strings) aimed at
+  #     specific fields. Requires the companion wordlists written next
+  #     to this config - see fuzzlists/injection-payloads.txt and
+  #     fuzzlists/otp-boundary.txt.
+  # --------------------------------------------------------------------
+
+  - name: "fuzz-marked-range-username-injection"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "<FUZZ>"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123"
+      - type: Message-Authenticator
+    iterations: 60          # matches injection-payloads.txt line count;
+                             # raise if the wordlist grows
+    strategies: [marked_range]
+    fuzzlist: "client/v2/fuzzlists/injection-payloads.txt"
+    baseline_response: Reject   # health-check sends the literal "<FUZZ>"
+                                 # text unsubstituted as the username -
+                                 # expected to fail auth
+    expect_no_accept: true      # a finding here (Accept) would mean one
+                                 # of the payload usernames is somehow
+                                 # treated as a valid, authenticated user
+
+  - name: "fuzz-marked-range-password-suffix-injection"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123<FUZZ>"        # real password + injected suffix
+      - type: Message-Authenticator
+    iterations: 60
+    strategies: [marked_range]
+    fuzzlist: "client/v2/fuzzlists/injection-payloads.txt"
+    baseline_response: Reject   # literal "123<FUZZ>" is not the real
+                                 # password/OTP, must Reject
+    expect_no_accept: true
+
+  - name: "fuzz-marked-range-otp-boundary-flow-b"
+    type: fuzz
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: User-Password
+        value: "123<FUZZ>"        # real password + boundary/odd OTP shapes
+      - type: Message-Authenticator
+    iterations: 20
+    strategies: [marked_range]
+    fuzzlist: "client/v2/fuzzlists/otp-boundary.txt"
+    baseline_response: Reject
+    expect_no_accept: true   # a finding here would mean the concatenation
+                              # boundary is ambiguous/exploitable (e.g. a
+                              # shorter-than-expected OTP still validating,
+                              # or non-numeric OTP text being accepted)
+  # ==========================================================================
+  # PART 2 — type: challenge  (Flow A: password -> Access-Challenge -> OTP)
+  #
+  # max_attempts is kept small ON PURPOSE throughout this section: OTP
+  # delivery is out-of-band (app/email) against a real account, and
+  # hammering it can lock out the account or spam its delivery channel.
+  # Raise it only within an authorized test window against an account you
+  # control. Flow B (concatenated password+OTP) has no second round-trip
+  # and so cannot be tested with type: challenge - its OTP fuzzing lives
+  # in 1.5 above via marked_range instead.
+  # ==========================================================================
+
+  - name: "challenge-baseline-first-factor"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: Message-Authenticator
+    response: Challenge   # confirms the server is in Flow A for this
+                           # account before the heavier challenge
+                           # scenarios below run
+
+  - name: "challenge-otp-brute-force-sequential"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    max_attempts: 10          # deliberately small, see warning above
+    otp_order: sequential
+    state_reuse: true          # does a single State keep validating across
+                                # repeated wrong guesses? (ideally: no)
+    timeout: 1s
+
+  - name: "challenge-otp-brute-force-random-order"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    max_attempts: 10
+    otp_order: random          # rules out a naive "only checks sequential
+                                # nearness to the real OTP" implementation
+    state_reuse: true
+    timeout: 1s
+
+  - name: "challenge-state-no-reuse"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    max_attempts: 5
+    state_reuse: false          # requests a FRESH State by re-sending the
+                                 # first factor between guesses, instead of
+                                 # replaying the original one - checks
+                                 # whether the server invalidates the old
+                                 # State once a new challenge is issued
+    timeout: 1s
+
+  - name: "challenge-state-corruption-checks"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    max_attempts: 3            # kept minimal - the interesting part here
+                                # is state_checks, not the brute force
+    state_checks: [bit_flip, truncate, foreign, drop]
+    timeout: 1s
+
+  - name: "challenge-otp-digit-length-mismatch-short"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999           # 3-digit guesses against a real 6-digit OTP -
+    otp_digits: 3           # confirms a short/malformed-length guess is
+    max_attempts: 5          # rejected outright rather than e.g. matched
+    timeout: 1s              # against a truncated prefix of the real OTP
+
+  - name: "challenge-otp-digit-length-mismatch-long"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 99999999       # 8-digit guesses against a real 6-digit OTP
+    otp_digits: 8
+    max_attempts: 5
+    timeout: 1s
+
+  - name: "challenge-otp-leading-zeros-range"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999           # forces every guess through 000-999, i.e.
+    otp_digits: 6           # zero-padded to 6 digits ("000000".."000999") -
+    max_attempts: 5          # checks the server compares the OTP as a
+    timeout: 1s               # fixed-width string, not as an integer that
+                               # would treat "000123" == "123"
+
+  - name: "challenge-otp-attr-override-flow-b-style"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    otp_attr: State          # sanity-checks that the harness/server pair
+    max_attempts: 3           # actually keys the second factor off
+    timeout: 1s                # User-Password as documented, not e.g. an
+                                # attacker-controlled State-adjacent field -
+                                # expected to behave like a no-op/failure
+                                # path since the guess never reaches
+                                # User-Password this way
+
+  - name: "challenge-lockout-probe-extended"
+    type: challenge
+    attrs:
+      - type: User-Name
+        value: "radsectest01"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+    otp_min: 0
+    otp_max: 999999
+    otp_digits: 6
+    max_attempts: 25       # raise ONLY inside an authorized test window,
+                            # on an account you control - this is the
+                            # scenario most likely to trip lockout/rate
+                            # limiting or spam the OTP delivery channel;
+                            # start small and raise deliberately
+    state_reuse: true
+    delay: 250ms             # spread attempts out slightly so a
+                              # rate-limiter keyed on request rate (rather
+                              # than attempt count) has a fair chance to
+                              # engage/not engage, making the NOTICE log
+                              # line more meaningful
+    timeout: 1s
+
+  - name: "challenge-unknown-user-never-challenges"
+    type: packet
+    attrs:
+      - type: User-Name
+        value: "definitely-not-a-real-user-abcxyz"
+      - type: User-Password
+        value: "123"
+      - type: NAS-Identifier
+        value: "RADIUStesting:radiussectest"
+      - type: Message-Authenticator
+    response: Reject   # symmetric to the unknown-user check in
+                        # config.security-suite.yaml - Challenge must
+                        # only ever be issued for a real username

